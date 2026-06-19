@@ -1,0 +1,2267 @@
+<table class="lvTable" border="0" cellpadding="0" cellspacing="0">
+<thead>
+	<tr class="lvTRhead">
+		<th class="lvTDheadOn">&nbsp;</th>
+		<th class="lvTDheadOn">Employee</th>
+		<th class="lvTDheadOn">Date From</th>
+		<th class="lvTDheadOn">Date To</th>
+		<th class="lvTDheadOn" style="text-align:right">Days of Absence</th>
+		<th class="lvTDheadOn" style="text-align:right">Hours of Absence</th>
+		<th class="lvTDheadOn" style="text-align:right"></th>
+	</tr>
+</thead>
+<tbody>
+	<tr class="lvTRodd" id="row0">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_0">Beaumont, Luke (28786)</td>
+		<td class="lvTDodd" id="cell2_0">27/03/2026</td>
+		<td class="lvTDodd" id="cell3_0">27/03/2026</td>
+		<td class="lvTDodd" id="cell4_0" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_0" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_0" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row1">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_1">Brown, Ben (32598)</td>
+		<td class="lvTDeven" id="cell2_1">24/04/2026</td>
+		<td class="lvTDeven" id="cell3_1">24/04/2026</td>
+		<td class="lvTDeven" id="cell4_1" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_1" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_1" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row2">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_2">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_2">27/03/2026</td>
+		<td class="lvTDodd" id="cell3_2">27/03/2026</td>
+		<td class="lvTDodd" id="cell4_2" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_2" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_2" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row3">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_3">Smythe, Gee (99998)</td>
+		<td class="lvTDeven" id="cell2_3">11/06/2026</td>
+		<td class="lvTDeven" id="cell3_3">17/06/2026</td>
+		<td class="lvTDeven" id="cell4_3" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_3" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_3" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRsub">
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub" style="text-align:right">7.00</td>
+		<td class="lvTDsub" style="text-align:right">&nbsp;</td>
+		<td class="lvTDsub" style="text-align:right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRsub">
+		<td class="lvTDsub">United Kingdom (&#163;) &nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row4">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_4">Allott, Mathew (32920)</td>
+		<td class="lvTDodd" id="cell2_4">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_4">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_4" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_4" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_4" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row5">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_5">Allott, Mathew (32920)</td>
+		<td class="lvTDeven" id="cell2_5">07/04/2026</td>
+		<td class="lvTDeven" id="cell3_5">10/04/2026</td>
+		<td class="lvTDeven" id="cell4_5" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_5" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_5" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row6">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_6">Allott, Mathew (32920)</td>
+		<td class="lvTDodd" id="cell2_6">27/05/2026</td>
+		<td class="lvTDodd" id="cell3_6">29/05/2026</td>
+		<td class="lvTDodd" id="cell4_6" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_6" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_6" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row7">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_7">Allott, Mathew (32920)</td>
+		<td class="lvTDeven" id="cell2_7">15/06/2026</td>
+		<td class="lvTDeven" id="cell3_7">19/06/2026</td>
+		<td class="lvTDeven" id="cell4_7" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_7" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_7" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row8">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_8">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_8">30/12/2025</td>
+		<td class="lvTDodd" id="cell3_8">31/01/2026</td>
+		<td class="lvTDodd" id="cell4_8" style="text-align: right">23.00</td>
+		<td class="lvTDodd" id="cell5_8" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_8" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTReven" id="row9">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_9">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_9">19/02/2026</td>
+		<td class="lvTDeven" id="cell3_9">19/02/2026</td>
+		<td class="lvTDeven" id="cell4_9" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_9" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_9" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row10">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_10">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_10">26/02/2026</td>
+		<td class="lvTDodd" id="cell3_10">26/02/2026</td>
+		<td class="lvTDodd" id="cell4_10" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_10" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_10" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row11">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_11">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_11">20/03/2026</td>
+		<td class="lvTDeven" id="cell3_11">20/03/2026</td>
+		<td class="lvTDeven" id="cell4_11" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_11" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_11" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row12">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_12">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_12">10/04/2026</td>
+		<td class="lvTDodd" id="cell3_12">10/04/2026</td>
+		<td class="lvTDodd" id="cell4_12" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_12" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_12" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row13">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_13">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_13">21/04/2026</td>
+		<td class="lvTDeven" id="cell3_13">21/04/2026</td>
+		<td class="lvTDeven" id="cell4_13" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_13" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_13" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row14">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_14">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_14">19/05/2026</td>
+		<td class="lvTDodd" id="cell3_14">19/05/2026</td>
+		<td class="lvTDodd" id="cell4_14" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_14" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_14" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row15">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_15">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_15">26/05/2026</td>
+		<td class="lvTDeven" id="cell3_15">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_15" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_15" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_15" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row16">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_16">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_16">01/06/2026</td>
+		<td class="lvTDodd" id="cell3_16">01/06/2026</td>
+		<td class="lvTDodd" id="cell4_16" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_16" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_16" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row17">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_17">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_17">05/06/2026</td>
+		<td class="lvTDeven" id="cell3_17">05/06/2026</td>
+		<td class="lvTDeven" id="cell4_17" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_17" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_17" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row18">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_18">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_18">10/08/2026</td>
+		<td class="lvTDodd" id="cell3_18">10/08/2026</td>
+		<td class="lvTDodd" id="cell4_18" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_18" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_18" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row19">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_19">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_19">24/08/2026</td>
+		<td class="lvTDeven" id="cell3_19">28/08/2026</td>
+		<td class="lvTDeven" id="cell4_19" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_19" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_19" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row20">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_20">Alvarez, Maria (31110)</td>
+		<td class="lvTDodd" id="cell2_20">01/09/2026</td>
+		<td class="lvTDodd" id="cell3_20">04/09/2026</td>
+		<td class="lvTDodd" id="cell4_20" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_20" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_20" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row21">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_21">Alvarez, Maria (31110)</td>
+		<td class="lvTDeven" id="cell2_21">14/09/2026</td>
+		<td class="lvTDeven" id="cell3_21">15/09/2026</td>
+		<td class="lvTDeven" id="cell4_21" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_21" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_21" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row22">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_22">Beaumont, Luke (28786)</td>
+		<td class="lvTDodd" id="cell2_22">06/04/2026</td>
+		<td class="lvTDodd" id="cell3_22">10/04/2026</td>
+		<td class="lvTDodd" id="cell4_22" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_22" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_22" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row23">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_23">Beaumont, Luke (28786)</td>
+		<td class="lvTDeven" id="cell2_23">01/05/2026</td>
+		<td class="lvTDeven" id="cell3_23">01/05/2026</td>
+		<td class="lvTDeven" id="cell4_23" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_23" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_23" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row24">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_24">Beaumont, Luke (28786)</td>
+		<td class="lvTDodd" id="cell2_24">27/07/2026</td>
+		<td class="lvTDodd" id="cell3_24">19/08/2026</td>
+		<td class="lvTDodd" id="cell4_24" style="text-align: right">18.00</td>
+		<td class="lvTDodd" id="cell5_24" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_24" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row25">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_25">Bell, Darren (27674)</td>
+		<td class="lvTDeven" id="cell2_25">02/01/2026</td>
+		<td class="lvTDeven" id="cell3_25">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_25" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_25" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_25" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row26">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_26">Bell, Darren (27674)</td>
+		<td class="lvTDodd" id="cell2_26">24/03/2026</td>
+		<td class="lvTDodd" id="cell3_26">24/03/2026</td>
+		<td class="lvTDodd" id="cell4_26" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_26" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_26" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row27">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_27">Bell, Darren (27674)</td>
+		<td class="lvTDeven" id="cell2_27">07/05/2026</td>
+		<td class="lvTDeven" id="cell3_27">08/05/2026</td>
+		<td class="lvTDeven" id="cell4_27" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_27" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_27" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row28">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_28">Bell, Darren (27674)</td>
+		<td class="lvTDodd" id="cell2_28">11/05/2026</td>
+		<td class="lvTDodd" id="cell3_28">15/05/2026</td>
+		<td class="lvTDodd" id="cell4_28" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_28" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_28" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row29">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_29">Bell, Darren (27674)</td>
+		<td class="lvTDeven" id="cell2_29">01/06/2026</td>
+		<td class="lvTDeven" id="cell3_29">03/06/2026</td>
+		<td class="lvTDeven" id="cell4_29" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_29" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_29" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row30">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_30">Bernadic, Jakub (29264)</td>
+		<td class="lvTDodd" id="cell2_30">22/12/2025</td>
+		<td class="lvTDodd" id="cell3_30">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_30" style="text-align: right">7.00</td>
+		<td class="lvTDodd" id="cell5_30" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_30" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTReven" id="row31">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_31">Bernadic, Jakub (29264)</td>
+		<td class="lvTDeven" id="cell2_31">12/01/2026</td>
+		<td class="lvTDeven" id="cell3_31">12/01/2026</td>
+		<td class="lvTDeven" id="cell4_31" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_31" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_31" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row32">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_32">Bernadic, Jakub (29264)</td>
+		<td class="lvTDodd" id="cell2_32">26/01/2026</td>
+		<td class="lvTDodd" id="cell3_32">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_32" style="text-align: right">4.50</td>
+		<td class="lvTDodd" id="cell5_32" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_32" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row33">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_33">Bernadic, Jakub (29264)</td>
+		<td class="lvTDeven" id="cell2_33">22/06/2026</td>
+		<td class="lvTDeven" id="cell3_33">05/07/2026</td>
+		<td class="lvTDeven" id="cell4_33" style="text-align: right">10.00</td>
+		<td class="lvTDeven" id="cell5_33" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_33" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row34">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_34">Bernadic, Jakub (29264)</td>
+		<td class="lvTDodd" id="cell2_34">06/07/2026</td>
+		<td class="lvTDodd" id="cell3_34">10/07/2026</td>
+		<td class="lvTDodd" id="cell4_34" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_34" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_34" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row35">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_35">Bernadic, Jakub (29264)</td>
+		<td class="lvTDeven" id="cell2_35">17/08/2026</td>
+		<td class="lvTDeven" id="cell3_35">20/08/2026</td>
+		<td class="lvTDeven" id="cell4_35" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_35" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_35" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row36">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_36">Beznea, Mihai (27677)</td>
+		<td class="lvTDodd" id="cell2_36">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_36">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_36" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_36" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_36" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row37">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_37">Beznea, Mihai (27677)</td>
+		<td class="lvTDeven" id="cell2_37">05/01/2026</td>
+		<td class="lvTDeven" id="cell3_37">06/01/2026</td>
+		<td class="lvTDeven" id="cell4_37" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_37" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_37" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row38">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_38">Beznea, Mihai (27677)</td>
+		<td class="lvTDodd" id="cell2_38">20/02/2026</td>
+		<td class="lvTDodd" id="cell3_38">20/02/2026</td>
+		<td class="lvTDodd" id="cell4_38" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_38" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_38" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row39">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_39">Beznea, Mihai (27677)</td>
+		<td class="lvTDeven" id="cell2_39">16/03/2026</td>
+		<td class="lvTDeven" id="cell3_39">16/03/2026</td>
+		<td class="lvTDeven" id="cell4_39" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_39" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_39" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row40">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_40">Beznea, Mihai (27677)</td>
+		<td class="lvTDodd" id="cell2_40">07/04/2026</td>
+		<td class="lvTDodd" id="cell3_40">10/04/2026</td>
+		<td class="lvTDodd" id="cell4_40" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_40" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_40" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row41">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_41">Beznea, Mihai (27677)</td>
+		<td class="lvTDeven" id="cell2_41">20/04/2026</td>
+		<td class="lvTDeven" id="cell3_41">20/04/2026</td>
+		<td class="lvTDeven" id="cell4_41" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_41" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_41" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row42">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_42">Beznea, Mihai (27677)</td>
+		<td class="lvTDodd" id="cell2_42">26/05/2026</td>
+		<td class="lvTDodd" id="cell3_42">29/05/2026</td>
+		<td class="lvTDodd" id="cell4_42" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_42" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_42" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row43">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_43">Beznea, Mihai (27677)</td>
+		<td class="lvTDeven" id="cell2_43">02/06/2026</td>
+		<td class="lvTDeven" id="cell3_43">02/06/2026</td>
+		<td class="lvTDeven" id="cell4_43" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_43" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_43" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row44">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_44">Birkin, Chris (100020)</td>
+		<td class="lvTDodd" id="cell2_44">22/12/2025</td>
+		<td class="lvTDodd" id="cell3_44">09/01/2026</td>
+		<td class="lvTDodd" id="cell4_44" style="text-align: right">12.00</td>
+		<td class="lvTDodd" id="cell5_44" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_44" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTReven" id="row45">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_45">Birkin, Chris (100020)</td>
+		<td class="lvTDeven" id="cell2_45">02/03/2026</td>
+		<td class="lvTDeven" id="cell3_45">02/03/2026</td>
+		<td class="lvTDeven" id="cell4_45" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_45" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_45" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row46">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_46">Birkin, Chris (100020)</td>
+		<td class="lvTDodd" id="cell2_46">08/05/2026</td>
+		<td class="lvTDodd" id="cell3_46">08/05/2026</td>
+		<td class="lvTDodd" id="cell4_46" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_46" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_46" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row47">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_47">Birkin, Chris (100020)</td>
+		<td class="lvTDeven" id="cell2_47">13/07/2026</td>
+		<td class="lvTDeven" id="cell3_47">20/07/2026</td>
+		<td class="lvTDeven" id="cell4_47" style="text-align: right">6.00</td>
+		<td class="lvTDeven" id="cell5_47" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_47" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row48">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_48">Brown, Ben (32598)</td>
+		<td class="lvTDodd" id="cell2_48">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_48">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_48" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_48" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_48" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row49">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_49">Brown, Ben (32598)</td>
+		<td class="lvTDeven" id="cell2_49">06/02/2026</td>
+		<td class="lvTDeven" id="cell3_49">06/02/2026</td>
+		<td class="lvTDeven" id="cell4_49" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_49" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_49" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row50">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_50">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDodd" id="cell2_50">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_50">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_50" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_50" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_50" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row51">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_51">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDeven" id="cell2_51">06/01/2026</td>
+		<td class="lvTDeven" id="cell3_51">09/01/2026</td>
+		<td class="lvTDeven" id="cell4_51" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_51" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_51" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row52">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_52">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDodd" id="cell2_52">13/01/2026</td>
+		<td class="lvTDodd" id="cell3_52">16/01/2026</td>
+		<td class="lvTDodd" id="cell4_52" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_52" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_52" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row53">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_53">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDeven" id="cell2_53">23/03/2026</td>
+		<td class="lvTDeven" id="cell3_53">27/03/2026</td>
+		<td class="lvTDeven" id="cell4_53" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_53" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_53" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row54">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_54">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDodd" id="cell2_54">31/03/2026</td>
+		<td class="lvTDodd" id="cell3_54">01/04/2026</td>
+		<td class="lvTDodd" id="cell4_54" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_54" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_54" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row55">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_55">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDeven" id="cell2_55">03/06/2026</td>
+		<td class="lvTDeven" id="cell3_55">05/06/2026</td>
+		<td class="lvTDeven" id="cell4_55" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_55" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_55" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row56">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_56">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDodd" id="cell2_56">08/06/2026</td>
+		<td class="lvTDodd" id="cell3_56">08/06/2026</td>
+		<td class="lvTDodd" id="cell4_56" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_56" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_56" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row57">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_57">Cabrera Fuentes, Carlos Miguel (29348)</td>
+		<td class="lvTDeven" id="cell2_57">03/08/2026</td>
+		<td class="lvTDeven" id="cell3_57">12/08/2026</td>
+		<td class="lvTDeven" id="cell4_57" style="text-align: right">8.00</td>
+		<td class="lvTDeven" id="cell5_57" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_57" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row58">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_58">Ditcher, Steven (100035)</td>
+		<td class="lvTDodd" id="cell2_58">22/07/2026</td>
+		<td class="lvTDodd" id="cell3_58">24/07/2026</td>
+		<td class="lvTDodd" id="cell4_58" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_58" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_58" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row59">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_59">Ditcher, Steven (100035)</td>
+		<td class="lvTDeven" id="cell2_59">27/07/2026</td>
+		<td class="lvTDeven" id="cell3_59">31/07/2026</td>
+		<td class="lvTDeven" id="cell4_59" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_59" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_59" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row60">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_60">Ditcher, Steven (100035)</td>
+		<td class="lvTDodd" id="cell2_60">03/08/2026</td>
+		<td class="lvTDodd" id="cell3_60">03/08/2026</td>
+		<td class="lvTDodd" id="cell4_60" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_60" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_60" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row61">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_61">Ditcher, Steven (100035)</td>
+		<td class="lvTDeven" id="cell2_61">07/08/2026</td>
+		<td class="lvTDeven" id="cell3_61">10/08/2026</td>
+		<td class="lvTDeven" id="cell4_61" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_61" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_61" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row62">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_62">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_62">03/02/2026</td>
+		<td class="lvTDodd" id="cell3_62">03/02/2026</td>
+		<td class="lvTDodd" id="cell4_62" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_62" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_62" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row63">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_63">Dunhill, Rachel (31654)</td>
+		<td class="lvTDeven" id="cell2_63">09/03/2026</td>
+		<td class="lvTDeven" id="cell3_63">13/03/2026</td>
+		<td class="lvTDeven" id="cell4_63" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_63" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_63" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row64">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_64">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_64">28/04/2026</td>
+		<td class="lvTDodd" id="cell3_64">28/04/2026</td>
+		<td class="lvTDodd" id="cell4_64" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_64" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_64" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row65">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_65">Dunhill, Rachel (31654)</td>
+		<td class="lvTDeven" id="cell2_65">28/04/2026</td>
+		<td class="lvTDeven" id="cell3_65">28/04/2026</td>
+		<td class="lvTDeven" id="cell4_65" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_65" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_65" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row66">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_66">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_66">15/05/2026</td>
+		<td class="lvTDodd" id="cell3_66">15/05/2026</td>
+		<td class="lvTDodd" id="cell4_66" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_66" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_66" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row67">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_67">Dunhill, Rachel (31654)</td>
+		<td class="lvTDeven" id="cell2_67">01/06/2026</td>
+		<td class="lvTDeven" id="cell3_67">05/06/2026</td>
+		<td class="lvTDeven" id="cell4_67" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_67" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_67" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row68">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_68">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_68">08/06/2026</td>
+		<td class="lvTDodd" id="cell3_68">12/06/2026</td>
+		<td class="lvTDodd" id="cell4_68" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_68" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_68" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row69">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_69">Dunhill, Rachel (31654)</td>
+		<td class="lvTDeven" id="cell2_69">16/07/2026</td>
+		<td class="lvTDeven" id="cell3_69">16/07/2026</td>
+		<td class="lvTDeven" id="cell4_69" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_69" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_69" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row70">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_70">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_70">31/07/2026</td>
+		<td class="lvTDodd" id="cell3_70">31/07/2026</td>
+		<td class="lvTDodd" id="cell4_70" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_70" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_70" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row71">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_71">Dunhill, Rachel (31654)</td>
+		<td class="lvTDeven" id="cell2_71">03/08/2026</td>
+		<td class="lvTDeven" id="cell3_71">03/08/2026</td>
+		<td class="lvTDeven" id="cell4_71" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_71" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_71" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row72">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_72">Dunhill, Rachel (31654)</td>
+		<td class="lvTDodd" id="cell2_72">21/09/2026</td>
+		<td class="lvTDodd" id="cell3_72">25/09/2026</td>
+		<td class="lvTDodd" id="cell4_72" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_72" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_72" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row73">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_73">Dyer, Rohan (100033)</td>
+		<td class="lvTDeven" id="cell2_73">23/01/2026</td>
+		<td class="lvTDeven" id="cell3_73">23/01/2026</td>
+		<td class="lvTDeven" id="cell4_73" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_73" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_73" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row74">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_74">Dyer, Rohan (100033)</td>
+		<td class="lvTDodd" id="cell2_74">30/01/2026</td>
+		<td class="lvTDodd" id="cell3_74">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_74" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_74" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_74" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row75">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_75">Dyer, Rohan (100033)</td>
+		<td class="lvTDeven" id="cell2_75">06/02/2026</td>
+		<td class="lvTDeven" id="cell3_75">06/02/2026</td>
+		<td class="lvTDeven" id="cell4_75" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_75" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_75" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row76">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_76">Dyer, Rohan (100033)</td>
+		<td class="lvTDodd" id="cell2_76">17/07/2026</td>
+		<td class="lvTDodd" id="cell3_76">17/07/2026</td>
+		<td class="lvTDodd" id="cell4_76" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_76" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_76" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row77">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_77">Dyer, Rohan (100033)</td>
+		<td class="lvTDeven" id="cell2_77">30/07/2026</td>
+		<td class="lvTDeven" id="cell3_77">06/08/2026</td>
+		<td class="lvTDeven" id="cell4_77" style="text-align: right">5.50</td>
+		<td class="lvTDeven" id="cell5_77" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_77" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row78">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_78">Dyer, Rohan (100033)</td>
+		<td class="lvTDodd" id="cell2_78">01/09/2026</td>
+		<td class="lvTDodd" id="cell3_78">01/09/2026</td>
+		<td class="lvTDodd" id="cell4_78" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_78" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_78" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row79">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_79">Dyer, Rohan (100033)</td>
+		<td class="lvTDeven" id="cell2_79">25/09/2026</td>
+		<td class="lvTDeven" id="cell3_79">25/09/2026</td>
+		<td class="lvTDeven" id="cell4_79" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_79" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_79" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row80">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_80">Glen-Findlay, Annie (99997)</td>
+		<td class="lvTDodd" id="cell2_80">26/03/2026</td>
+		<td class="lvTDodd" id="cell3_80">02/04/2026</td>
+		<td class="lvTDodd" id="cell4_80" style="text-align: right">5.50</td>
+		<td class="lvTDodd" id="cell5_80" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_80" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row81">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_81">Glen-Findlay, Annie (99997)</td>
+		<td class="lvTDeven" id="cell2_81">10/04/2026</td>
+		<td class="lvTDeven" id="cell3_81">23/04/2026</td>
+		<td class="lvTDeven" id="cell4_81" style="text-align: right">10.00</td>
+		<td class="lvTDeven" id="cell5_81" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_81" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row82">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_82">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_82">12/01/2026</td>
+		<td class="lvTDodd" id="cell3_82">12/01/2026</td>
+		<td class="lvTDodd" id="cell4_82" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_82" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_82" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row83">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_83">Handley-Watson, James (30140)</td>
+		<td class="lvTDeven" id="cell2_83">16/01/2026</td>
+		<td class="lvTDeven" id="cell3_83">16/01/2026</td>
+		<td class="lvTDeven" id="cell4_83" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_83" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_83" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row84">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_84">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_84">19/01/2026</td>
+		<td class="lvTDodd" id="cell3_84">19/01/2026</td>
+		<td class="lvTDodd" id="cell4_84" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_84" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_84" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row85">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_85">Handley-Watson, James (30140)</td>
+		<td class="lvTDeven" id="cell2_85">22/01/2026</td>
+		<td class="lvTDeven" id="cell3_85">23/01/2026</td>
+		<td class="lvTDeven" id="cell4_85" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_85" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_85" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row86">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_86">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_86">06/02/2026</td>
+		<td class="lvTDodd" id="cell3_86">06/02/2026</td>
+		<td class="lvTDodd" id="cell4_86" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_86" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_86" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row87">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_87">Handley-Watson, James (30140)</td>
+		<td class="lvTDeven" id="cell2_87">23/02/2026</td>
+		<td class="lvTDeven" id="cell3_87">27/02/2026</td>
+		<td class="lvTDeven" id="cell4_87" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_87" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_87" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row88">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_88">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_88">18/05/2026</td>
+		<td class="lvTDodd" id="cell3_88">18/05/2026</td>
+		<td class="lvTDodd" id="cell4_88" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_88" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_88" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row89">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_89">Handley-Watson, James (30140)</td>
+		<td class="lvTDeven" id="cell2_89">28/05/2026</td>
+		<td class="lvTDeven" id="cell3_89">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_89" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_89" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_89" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row90">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_90">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_90">28/08/2026</td>
+		<td class="lvTDodd" id="cell3_90">28/08/2026</td>
+		<td class="lvTDodd" id="cell4_90" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_90" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_90" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row91">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_91">Handley-Watson, James (30140)</td>
+		<td class="lvTDeven" id="cell2_91">07/09/2026</td>
+		<td class="lvTDeven" id="cell3_91">11/09/2026</td>
+		<td class="lvTDeven" id="cell4_91" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_91" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_91" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row92">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_92">Handley-Watson, James (30140)</td>
+		<td class="lvTDodd" id="cell2_92">17/09/2026</td>
+		<td class="lvTDodd" id="cell3_92">17/09/2026</td>
+		<td class="lvTDodd" id="cell4_92" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_92" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_92" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row93">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_93">Hope, Matthew (100007)</td>
+		<td class="lvTDeven" id="cell2_93">09/02/2026</td>
+		<td class="lvTDeven" id="cell3_93">13/02/2026</td>
+		<td class="lvTDeven" id="cell4_93" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_93" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_93" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row94">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_94">Hope, Matthew (100007)</td>
+		<td class="lvTDodd" id="cell2_94">16/02/2026</td>
+		<td class="lvTDodd" id="cell3_94">20/02/2026</td>
+		<td class="lvTDodd" id="cell4_94" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_94" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_94" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row95">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_95">Hope, Matthew (100007)</td>
+		<td class="lvTDeven" id="cell2_95">23/02/2026</td>
+		<td class="lvTDeven" id="cell3_95">27/02/2026</td>
+		<td class="lvTDeven" id="cell4_95" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_95" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_95" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row96">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_96">Hope, Matthew (100007)</td>
+		<td class="lvTDodd" id="cell2_96">02/03/2026</td>
+		<td class="lvTDodd" id="cell3_96">02/03/2026</td>
+		<td class="lvTDodd" id="cell4_96" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_96" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_96" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row97">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_97">Hope, Matthew (100007)</td>
+		<td class="lvTDeven" id="cell2_97">26/05/2026</td>
+		<td class="lvTDeven" id="cell3_97">26/05/2026</td>
+		<td class="lvTDeven" id="cell4_97" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_97" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_97" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row98">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_98">Hope, Matthew (100007)</td>
+		<td class="lvTDodd" id="cell2_98">17/07/2026</td>
+		<td class="lvTDodd" id="cell3_98">17/07/2026</td>
+		<td class="lvTDodd" id="cell4_98" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_98" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_98" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row99">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_99">Hope, Matthew (100007)</td>
+		<td class="lvTDeven" id="cell2_99">23/07/2026</td>
+		<td class="lvTDeven" id="cell3_99">24/07/2026</td>
+		<td class="lvTDeven" id="cell4_99" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_99" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_99" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row100">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_100">Hope, Matthew (100007)</td>
+		<td class="lvTDodd" id="cell2_100">27/07/2026</td>
+		<td class="lvTDodd" id="cell3_100">27/07/2026</td>
+		<td class="lvTDodd" id="cell4_100" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_100" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_100" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row101">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_101">Hope, Matthew (100007)</td>
+		<td class="lvTDeven" id="cell2_101">20/08/2026</td>
+		<td class="lvTDeven" id="cell3_101">21/08/2026</td>
+		<td class="lvTDeven" id="cell4_101" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_101" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_101" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row102">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_102">Hope, Matthew (100007)</td>
+		<td class="lvTDodd" id="cell2_102">24/08/2026</td>
+		<td class="lvTDodd" id="cell3_102">24/08/2026</td>
+		<td class="lvTDodd" id="cell4_102" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_102" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_102" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row103">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_103">Hunter, Alex (27688)</td>
+		<td class="lvTDeven" id="cell2_103">02/01/2026</td>
+		<td class="lvTDeven" id="cell3_103">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_103" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_103" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_103" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row104">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_104">Hunter, Alex (27688)</td>
+		<td class="lvTDodd" id="cell2_104">09/01/2026</td>
+		<td class="lvTDodd" id="cell3_104">09/01/2026</td>
+		<td class="lvTDodd" id="cell4_104" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_104" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_104" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row105">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_105">Hunter, Alex (27688)</td>
+		<td class="lvTDeven" id="cell2_105">29/01/2026</td>
+		<td class="lvTDeven" id="cell3_105">30/01/2026</td>
+		<td class="lvTDeven" id="cell4_105" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_105" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_105" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row106">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_106">Hunter, Alex (27688)</td>
+		<td class="lvTDodd" id="cell2_106">13/02/2026</td>
+		<td class="lvTDodd" id="cell3_106">13/02/2026</td>
+		<td class="lvTDodd" id="cell4_106" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_106" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_106" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row107">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_107">Hunter, Alex (27688)</td>
+		<td class="lvTDeven" id="cell2_107">08/06/2026</td>
+		<td class="lvTDeven" id="cell3_107">11/06/2026</td>
+		<td class="lvTDeven" id="cell4_107" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_107" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_107" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row108">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_108">Hunter, Alex (27688)</td>
+		<td class="lvTDodd" id="cell2_108">07/08/2026</td>
+		<td class="lvTDodd" id="cell3_108">14/08/2026</td>
+		<td class="lvTDodd" id="cell4_108" style="text-align: right">6.00</td>
+		<td class="lvTDodd" id="cell5_108" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_108" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row109">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_109">Keelty, Victoria (100005)</td>
+		<td class="lvTDeven" id="cell2_109">22/12/2025</td>
+		<td class="lvTDeven" id="cell3_109">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_109" style="text-align: right">7.00</td>
+		<td class="lvTDeven" id="cell5_109" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_109" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTRodd" id="row110">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_110">Keelty, Victoria (100005)</td>
+		<td class="lvTDodd" id="cell2_110">05/01/2026</td>
+		<td class="lvTDodd" id="cell3_110">05/01/2026</td>
+		<td class="lvTDodd" id="cell4_110" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_110" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_110" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row111">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_111">Keelty, Victoria (100005)</td>
+		<td class="lvTDeven" id="cell2_111">24/04/2026</td>
+		<td class="lvTDeven" id="cell3_111">24/04/2026</td>
+		<td class="lvTDeven" id="cell4_111" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_111" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_111" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row112">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_112">Keelty, Victoria (100005)</td>
+		<td class="lvTDodd" id="cell2_112">29/06/2026</td>
+		<td class="lvTDodd" id="cell3_112">29/06/2026</td>
+		<td class="lvTDodd" id="cell4_112" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_112" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_112" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row113">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_113">Kidd, Lewis (100028)</td>
+		<td class="lvTDeven" id="cell2_113">21/05/2026</td>
+		<td class="lvTDeven" id="cell3_113">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_113" style="text-align: right">6.00</td>
+		<td class="lvTDeven" id="cell5_113" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_113" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row114">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_114">Kidd, Lewis (100028)</td>
+		<td class="lvTDodd" id="cell2_114">05/06/2026</td>
+		<td class="lvTDodd" id="cell3_114">05/06/2026</td>
+		<td class="lvTDodd" id="cell4_114" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_114" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_114" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row115">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_115">Kidd, Lewis (100028)</td>
+		<td class="lvTDeven" id="cell2_115">27/08/2026</td>
+		<td class="lvTDeven" id="cell3_115">28/08/2026</td>
+		<td class="lvTDeven" id="cell4_115" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_115" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_115" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row116">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_116">King, Katie (39984)</td>
+		<td class="lvTDodd" id="cell2_116">30/01/2026</td>
+		<td class="lvTDodd" id="cell3_116">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_116" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_116" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_116" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row117">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_117">King, Katie (39984)</td>
+		<td class="lvTDeven" id="cell2_117">07/04/2026</td>
+		<td class="lvTDeven" id="cell3_117">08/04/2026</td>
+		<td class="lvTDeven" id="cell4_117" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_117" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_117" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row118">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_118">King, Katie (39984)</td>
+		<td class="lvTDodd" id="cell2_118">10/07/2026</td>
+		<td class="lvTDodd" id="cell3_118">10/07/2026</td>
+		<td class="lvTDodd" id="cell4_118" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_118" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_118" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row119">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_119">King, Katie (39984)</td>
+		<td class="lvTDeven" id="cell2_119">13/07/2026</td>
+		<td class="lvTDeven" id="cell3_119">17/07/2026</td>
+		<td class="lvTDeven" id="cell4_119" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_119" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_119" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row120">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_120">King, Katie (39984)</td>
+		<td class="lvTDodd" id="cell2_120">20/07/2026</td>
+		<td class="lvTDodd" id="cell3_120">22/07/2026</td>
+		<td class="lvTDodd" id="cell4_120" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_120" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_120" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row121">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_121">King, Katie (39984)</td>
+		<td class="lvTDeven" id="cell2_121">23/07/2026</td>
+		<td class="lvTDeven" id="cell3_121">24/07/2026</td>
+		<td class="lvTDeven" id="cell4_121" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_121" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_121" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row122">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_122">King, Katie (39984)</td>
+		<td class="lvTDodd" id="cell2_122">08/10/2026</td>
+		<td class="lvTDodd" id="cell3_122">09/10/2026</td>
+		<td class="lvTDodd" id="cell4_122" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_122" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_122" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row123">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_123">King, Katie (39984)</td>
+		<td class="lvTDeven" id="cell2_123">12/10/2026</td>
+		<td class="lvTDeven" id="cell3_123">13/10/2026</td>
+		<td class="lvTDeven" id="cell4_123" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_123" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_123" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row124">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_124">King, Katie (39984)</td>
+		<td class="lvTDodd" id="cell2_124">13/11/2026</td>
+		<td class="lvTDodd" id="cell3_124">13/11/2026</td>
+		<td class="lvTDodd" id="cell4_124" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_124" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_124" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row125">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_125">King, Katie (39984)</td>
+		<td class="lvTDeven" id="cell2_125">16/11/2026</td>
+		<td class="lvTDeven" id="cell3_125">18/11/2026</td>
+		<td class="lvTDeven" id="cell4_125" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_125" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_125" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row126">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_126">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDodd" id="cell2_126">29/01/2026</td>
+		<td class="lvTDodd" id="cell3_126">29/01/2026</td>
+		<td class="lvTDodd" id="cell4_126" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_126" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_126" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row127">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_127">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDeven" id="cell2_127">30/01/2026</td>
+		<td class="lvTDeven" id="cell3_127">30/01/2026</td>
+		<td class="lvTDeven" id="cell4_127" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_127" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_127" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row128">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_128">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDodd" id="cell2_128">13/03/2026</td>
+		<td class="lvTDodd" id="cell3_128">13/03/2026</td>
+		<td class="lvTDodd" id="cell4_128" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_128" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_128" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row129">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_129">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDeven" id="cell2_129">01/05/2026</td>
+		<td class="lvTDeven" id="cell3_129">01/05/2026</td>
+		<td class="lvTDeven" id="cell4_129" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_129" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_129" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row130">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_130">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDodd" id="cell2_130">14/05/2026</td>
+		<td class="lvTDodd" id="cell3_130">22/05/2026</td>
+		<td class="lvTDodd" id="cell4_130" style="text-align: right">7.00</td>
+		<td class="lvTDodd" id="cell5_130" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_130" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row131">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_131">Kucharczyk, Wojciech (100032)</td>
+		<td class="lvTDeven" id="cell2_131">07/09/2026</td>
+		<td class="lvTDeven" id="cell3_131">11/09/2026</td>
+		<td class="lvTDeven" id="cell4_131" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_131" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_131" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row132">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_132">Lander, Lauren (100018)</td>
+		<td class="lvTDodd" id="cell2_132">10/04/2026</td>
+		<td class="lvTDodd" id="cell3_132">13/04/2026</td>
+		<td class="lvTDodd" id="cell4_132" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_132" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_132" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row133">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_133">Lander, Lauren (100018)</td>
+		<td class="lvTDeven" id="cell2_133">12/06/2026</td>
+		<td class="lvTDeven" id="cell3_133">12/06/2026</td>
+		<td class="lvTDeven" id="cell4_133" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_133" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_133" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row134">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_134">Lander, Lauren (100018)</td>
+		<td class="lvTDodd" id="cell2_134">03/07/2026</td>
+		<td class="lvTDodd" id="cell3_134">03/07/2026</td>
+		<td class="lvTDodd" id="cell4_134" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_134" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_134" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row135">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_135">Lander, Lauren (100018)</td>
+		<td class="lvTDeven" id="cell2_135">13/07/2026</td>
+		<td class="lvTDeven" id="cell3_135">17/07/2026</td>
+		<td class="lvTDeven" id="cell4_135" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_135" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_135" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row136">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_136">Lander, Lauren (100018)</td>
+		<td class="lvTDodd" id="cell2_136">15/09/2026</td>
+		<td class="lvTDodd" id="cell3_136">24/09/2026</td>
+		<td class="lvTDodd" id="cell4_136" style="text-align: right">8.00</td>
+		<td class="lvTDodd" id="cell5_136" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_136" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row137">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_137">Lau, Zara (38835)</td>
+		<td class="lvTDeven" id="cell2_137">16/03/2026</td>
+		<td class="lvTDeven" id="cell3_137">20/03/2026</td>
+		<td class="lvTDeven" id="cell4_137" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_137" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_137" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row138">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_138">Lau, Zara (38835)</td>
+		<td class="lvTDodd" id="cell2_138">11/05/2026</td>
+		<td class="lvTDodd" id="cell3_138">12/05/2026</td>
+		<td class="lvTDodd" id="cell4_138" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_138" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_138" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row139">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_139">Lau, Zara (38835)</td>
+		<td class="lvTDeven" id="cell2_139">01/09/2026</td>
+		<td class="lvTDeven" id="cell3_139">15/09/2026</td>
+		<td class="lvTDeven" id="cell4_139" style="text-align: right">11.00</td>
+		<td class="lvTDeven" id="cell5_139" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_139" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row140">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_140">Limmer, David (100036)</td>
+		<td class="lvTDodd" id="cell2_140">19/06/2026</td>
+		<td class="lvTDodd" id="cell3_140">19/06/2026</td>
+		<td class="lvTDodd" id="cell4_140" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_140" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_140" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row141">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_141">Limmer, David (100036)</td>
+		<td class="lvTDeven" id="cell2_141">08/07/2026</td>
+		<td class="lvTDeven" id="cell3_141">10/07/2026</td>
+		<td class="lvTDeven" id="cell4_141" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_141" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_141" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row142">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_142">Limmer, David (100036)</td>
+		<td class="lvTDodd" id="cell2_142">27/07/2026</td>
+		<td class="lvTDodd" id="cell3_142">29/07/2026</td>
+		<td class="lvTDodd" id="cell4_142" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_142" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_142" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row143">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_143">Mapley, Neil (27694)</td>
+		<td class="lvTDeven" id="cell2_143">10/04/2026</td>
+		<td class="lvTDeven" id="cell3_143">17/04/2026</td>
+		<td class="lvTDeven" id="cell4_143" style="text-align: right">6.00</td>
+		<td class="lvTDeven" id="cell5_143" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_143" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row144">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_144">Mapley, Neil (27694)</td>
+		<td class="lvTDodd" id="cell2_144">24/04/2026</td>
+		<td class="lvTDodd" id="cell3_144">24/04/2026</td>
+		<td class="lvTDodd" id="cell4_144" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_144" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_144" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row145">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_145">Mapley, Neil (27694)</td>
+		<td class="lvTDeven" id="cell2_145">28/04/2026</td>
+		<td class="lvTDeven" id="cell3_145">28/04/2026</td>
+		<td class="lvTDeven" id="cell4_145" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_145" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_145" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row146">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_146">Mapley, Neil (27694)</td>
+		<td class="lvTDodd" id="cell2_146">11/05/2026</td>
+		<td class="lvTDodd" id="cell3_146">11/05/2026</td>
+		<td class="lvTDodd" id="cell4_146" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_146" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_146" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row147">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_147">Mapley, Neil (27694)</td>
+		<td class="lvTDeven" id="cell2_147">26/05/2026</td>
+		<td class="lvTDeven" id="cell3_147">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_147" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_147" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_147" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row148">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_148">Mapley, Neil (27694)</td>
+		<td class="lvTDodd" id="cell2_148">11/06/2026</td>
+		<td class="lvTDodd" id="cell3_148">11/06/2026</td>
+		<td class="lvTDodd" id="cell4_148" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_148" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_148" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row149">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_149">Mapley, Neil (27694)</td>
+		<td class="lvTDeven" id="cell2_149">17/06/2026</td>
+		<td class="lvTDeven" id="cell3_149">17/06/2026</td>
+		<td class="lvTDeven" id="cell4_149" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_149" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_149" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row150">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_150">Mckay, Matthew (38932)</td>
+		<td class="lvTDodd" id="cell2_150">02/03/2026</td>
+		<td class="lvTDodd" id="cell3_150">14/03/2026</td>
+		<td class="lvTDodd" id="cell4_150" style="text-align: right">10.00</td>
+		<td class="lvTDodd" id="cell5_150" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_150" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row151">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_151">Mckay, Matthew (38932)</td>
+		<td class="lvTDeven" id="cell2_151">16/03/2026</td>
+		<td class="lvTDeven" id="cell3_151">17/03/2026</td>
+		<td class="lvTDeven" id="cell4_151" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_151" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_151" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row152">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_152">Mckay, Matthew (38932)</td>
+		<td class="lvTDodd" id="cell2_152">06/07/2026</td>
+		<td class="lvTDodd" id="cell3_152">15/07/2026</td>
+		<td class="lvTDodd" id="cell4_152" style="text-align: right">8.00</td>
+		<td class="lvTDodd" id="cell5_152" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_152" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row153">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_153">Mulero, Alberto (31656)</td>
+		<td class="lvTDeven" id="cell2_153">02/01/2026</td>
+		<td class="lvTDeven" id="cell3_153">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_153" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_153" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_153" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row154">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_154">Mulero, Alberto (31656)</td>
+		<td class="lvTDodd" id="cell2_154">16/01/2026</td>
+		<td class="lvTDodd" id="cell3_154">16/01/2026</td>
+		<td class="lvTDodd" id="cell4_154" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_154" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_154" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row155">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_155">Mulero, Alberto (31656)</td>
+		<td class="lvTDeven" id="cell2_155">27/03/2026</td>
+		<td class="lvTDeven" id="cell3_155">27/03/2026</td>
+		<td class="lvTDeven" id="cell4_155" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_155" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_155" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row156">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_156">Mulero, Alberto (31656)</td>
+		<td class="lvTDodd" id="cell2_156">30/03/2026</td>
+		<td class="lvTDodd" id="cell3_156">30/03/2026</td>
+		<td class="lvTDodd" id="cell4_156" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_156" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_156" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row157">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_157">Mulero, Alberto (31656)</td>
+		<td class="lvTDeven" id="cell2_157">08/06/2026</td>
+		<td class="lvTDeven" id="cell3_157">22/06/2026</td>
+		<td class="lvTDeven" id="cell4_157" style="text-align: right">11.00</td>
+		<td class="lvTDeven" id="cell5_157" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_157" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row158">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_158">Murphy, Keiren (41186)</td>
+		<td class="lvTDodd" id="cell2_158">29/01/2026</td>
+		<td class="lvTDodd" id="cell3_158">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_158" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_158" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_158" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row159">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_159">Murphy, Keiren (41186)</td>
+		<td class="lvTDeven" id="cell2_159">31/03/2026</td>
+		<td class="lvTDeven" id="cell3_159">03/04/2026</td>
+		<td class="lvTDeven" id="cell4_159" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_159" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_159" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row160">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_160">Obora, Gregory (100001)</td>
+		<td class="lvTDodd" id="cell2_160">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_160">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_160" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_160" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_160" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row161">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_161">Obora, Gregory (100001)</td>
+		<td class="lvTDeven" id="cell2_161">11/02/2026</td>
+		<td class="lvTDeven" id="cell3_161">16/02/2026</td>
+		<td class="lvTDeven" id="cell4_161" style="text-align: right">4.00</td>
+		<td class="lvTDeven" id="cell5_161" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_161" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row162">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_162">Obora, Gregory (100001)</td>
+		<td class="lvTDodd" id="cell2_162">25/03/2026</td>
+		<td class="lvTDodd" id="cell3_162">27/03/2026</td>
+		<td class="lvTDodd" id="cell4_162" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_162" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_162" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row163">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_163">Obora, Gregory (100001)</td>
+		<td class="lvTDeven" id="cell2_163">13/04/2026</td>
+		<td class="lvTDeven" id="cell3_163">17/04/2026</td>
+		<td class="lvTDeven" id="cell4_163" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_163" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_163" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row164">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_164">Obora, Gregory (100001)</td>
+		<td class="lvTDodd" id="cell2_164">06/08/2026</td>
+		<td class="lvTDodd" id="cell3_164">11/08/2026</td>
+		<td class="lvTDodd" id="cell4_164" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_164" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_164" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row165">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_165">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDeven" id="cell2_165">13/01/2026</td>
+		<td class="lvTDeven" id="cell3_165">13/01/2026</td>
+		<td class="lvTDeven" id="cell4_165" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_165" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_165" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row166">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_166">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDodd" id="cell2_166">26/01/2026</td>
+		<td class="lvTDodd" id="cell3_166">26/01/2026</td>
+		<td class="lvTDodd" id="cell4_166" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_166" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_166" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row167">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_167">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDeven" id="cell2_167">02/02/2026</td>
+		<td class="lvTDeven" id="cell3_167">02/02/2026</td>
+		<td class="lvTDeven" id="cell4_167" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_167" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_167" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row168">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_168">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDodd" id="cell2_168">13/04/2026</td>
+		<td class="lvTDodd" id="cell3_168">17/04/2026</td>
+		<td class="lvTDodd" id="cell4_168" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_168" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_168" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row169">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_169">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDeven" id="cell2_169">29/05/2026</td>
+		<td class="lvTDeven" id="cell3_169">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_169" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_169" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_169" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row170">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_170">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDodd" id="cell2_170">01/06/2026</td>
+		<td class="lvTDodd" id="cell3_170">01/06/2026</td>
+		<td class="lvTDodd" id="cell4_170" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_170" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_170" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row171">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_171">O&#39;Connell, Luke (100034)</td>
+		<td class="lvTDeven" id="cell2_171">24/06/2026</td>
+		<td class="lvTDeven" id="cell3_171">26/06/2026</td>
+		<td class="lvTDeven" id="cell4_171" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_171" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_171" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row172">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_172">Pena, Bethania (100030)</td>
+		<td class="lvTDodd" id="cell2_172">06/01/2026</td>
+		<td class="lvTDodd" id="cell3_172">06/01/2026</td>
+		<td class="lvTDodd" id="cell4_172" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_172" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_172" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row173">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_173">Pena, Bethania (100030)</td>
+		<td class="lvTDeven" id="cell2_173">14/01/2026</td>
+		<td class="lvTDeven" id="cell3_173">14/01/2026</td>
+		<td class="lvTDeven" id="cell4_173" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_173" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_173" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row174">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_174">Pena, Bethania (100030)</td>
+		<td class="lvTDodd" id="cell2_174">26/02/2026</td>
+		<td class="lvTDodd" id="cell3_174">27/02/2026</td>
+		<td class="lvTDodd" id="cell4_174" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_174" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_174" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row175">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_175">Pena, Bethania (100030)</td>
+		<td class="lvTDeven" id="cell2_175">22/06/2026</td>
+		<td class="lvTDeven" id="cell3_175">26/06/2026</td>
+		<td class="lvTDeven" id="cell4_175" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_175" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_175" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row176">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_176">Phillpotts, Gregory (29353)</td>
+		<td class="lvTDodd" id="cell2_176">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_176">06/01/2026</td>
+		<td class="lvTDodd" id="cell4_176" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_176" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_176" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row177">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_177">Phillpotts, Gregory (29353)</td>
+		<td class="lvTDeven" id="cell2_177">02/04/2026</td>
+		<td class="lvTDeven" id="cell3_177">10/04/2026</td>
+		<td class="lvTDeven" id="cell4_177" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_177" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_177" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row178">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_178">Pointon, James (40111)</td>
+		<td class="lvTDodd" id="cell2_178">16/04/2026</td>
+		<td class="lvTDodd" id="cell3_178">20/04/2026</td>
+		<td class="lvTDodd" id="cell4_178" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_178" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_178" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row179">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_179">Pointon, James (40111)</td>
+		<td class="lvTDeven" id="cell2_179">24/04/2026</td>
+		<td class="lvTDeven" id="cell3_179">28/04/2026</td>
+		<td class="lvTDeven" id="cell4_179" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_179" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_179" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row180">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_180">Pointon, James (40111)</td>
+		<td class="lvTDodd" id="cell2_180">29/05/2026</td>
+		<td class="lvTDodd" id="cell3_180">29/05/2026</td>
+		<td class="lvTDodd" id="cell4_180" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_180" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_180" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row181">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_181">Pointon, James (40111)</td>
+		<td class="lvTDeven" id="cell2_181">30/10/2026</td>
+		<td class="lvTDeven" id="cell3_181">06/11/2026</td>
+		<td class="lvTDeven" id="cell4_181" style="text-align: right">6.00</td>
+		<td class="lvTDeven" id="cell5_181" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_181" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row182">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_182">Postgate, Emilie (100017)</td>
+		<td class="lvTDodd" id="cell2_182">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_182">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_182" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_182" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_182" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row183">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_183">Postgate, Emilie (100017)</td>
+		<td class="lvTDeven" id="cell2_183">25/03/2026</td>
+		<td class="lvTDeven" id="cell3_183">25/03/2026</td>
+		<td class="lvTDeven" id="cell4_183" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_183" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_183" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row184">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_184">Postgate, Emilie (100017)</td>
+		<td class="lvTDodd" id="cell2_184">11/05/2026</td>
+		<td class="lvTDodd" id="cell3_184">11/05/2026</td>
+		<td class="lvTDodd" id="cell4_184" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_184" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_184" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row185">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_185">Postgate, Emilie (100017)</td>
+		<td class="lvTDeven" id="cell2_185">30/07/2026</td>
+		<td class="lvTDeven" id="cell3_185">31/07/2026</td>
+		<td class="lvTDeven" id="cell4_185" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_185" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_185" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row186">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_186">Postgate, Emilie (100017)</td>
+		<td class="lvTDodd" id="cell2_186">03/08/2026</td>
+		<td class="lvTDodd" id="cell3_186">03/08/2026</td>
+		<td class="lvTDodd" id="cell4_186" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_186" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_186" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row187">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_187">Postgate, Emilie (100017)</td>
+		<td class="lvTDeven" id="cell2_187">04/08/2026</td>
+		<td class="lvTDeven" id="cell3_187">04/08/2026</td>
+		<td class="lvTDeven" id="cell4_187" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_187" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_187" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row188">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_188">Postgate, Emilie (100017)</td>
+		<td class="lvTDodd" id="cell2_188">24/08/2026</td>
+		<td class="lvTDodd" id="cell3_188">28/08/2026</td>
+		<td class="lvTDodd" id="cell4_188" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_188" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_188" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row189">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_189">Rawling-Allott, Alice (28776)</td>
+		<td class="lvTDeven" id="cell2_189">22/12/2025</td>
+		<td class="lvTDeven" id="cell3_189">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_189" style="text-align: right">7.00</td>
+		<td class="lvTDeven" id="cell5_189" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_189" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTRodd" id="row190">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_190">Rawling-Allott, Alice (28776)</td>
+		<td class="lvTDodd" id="cell2_190">30/01/2026</td>
+		<td class="lvTDodd" id="cell3_190">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_190" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_190" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_190" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row191">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_191">Rawling-Allott, Alice (28776)</td>
+		<td class="lvTDeven" id="cell2_191">15/05/2026</td>
+		<td class="lvTDeven" id="cell3_191">15/05/2026</td>
+		<td class="lvTDeven" id="cell4_191" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_191" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_191" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row192">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_192">Rawling-Allott, Alice (28776)</td>
+		<td class="lvTDodd" id="cell2_192">22/05/2026</td>
+		<td class="lvTDodd" id="cell3_192">29/05/2026</td>
+		<td class="lvTDodd" id="cell4_192" style="text-align: right">5.00</td>
+		<td class="lvTDodd" id="cell5_192" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_192" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row193">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_193">Schuler, Felix (100038)</td>
+		<td class="lvTDeven" id="cell2_193">23/01/2026</td>
+		<td class="lvTDeven" id="cell3_193">23/01/2026</td>
+		<td class="lvTDeven" id="cell4_193" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_193" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_193" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row194">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_194">Schuler, Felix (100038)</td>
+		<td class="lvTDodd" id="cell2_194">30/01/2026</td>
+		<td class="lvTDodd" id="cell3_194">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_194" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_194" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_194" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row195">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_195">Schuler, Felix (100038)</td>
+		<td class="lvTDeven" id="cell2_195">27/02/2026</td>
+		<td class="lvTDeven" id="cell3_195">27/02/2026</td>
+		<td class="lvTDeven" id="cell4_195" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_195" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_195" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row196">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_196">Schuler, Felix (100038)</td>
+		<td class="lvTDodd" id="cell2_196">01/04/2026</td>
+		<td class="lvTDodd" id="cell3_196">01/04/2026</td>
+		<td class="lvTDodd" id="cell4_196" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_196" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_196" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row197">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_197">Schuler, Felix (100038)</td>
+		<td class="lvTDeven" id="cell2_197">10/04/2026</td>
+		<td class="lvTDeven" id="cell3_197">10/04/2026</td>
+		<td class="lvTDeven" id="cell4_197" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_197" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_197" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row198">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_198">Schuler, Felix (100038)</td>
+		<td class="lvTDodd" id="cell2_198">14/05/2026</td>
+		<td class="lvTDodd" id="cell3_198">18/05/2026</td>
+		<td class="lvTDodd" id="cell4_198" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_198" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_198" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row199">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_199">Schuler, Felix (100038)</td>
+		<td class="lvTDeven" id="cell2_199">19/06/2026</td>
+		<td class="lvTDeven" id="cell3_199">19/06/2026</td>
+		<td class="lvTDeven" id="cell4_199" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_199" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_199" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row200">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_200">Skarbek, Andrzej (29265)</td>
+		<td class="lvTDodd" id="cell2_200">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_200">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_200" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_200" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_200" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row201">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_201">Skarbek, Andrzej (29265)</td>
+		<td class="lvTDeven" id="cell2_201">01/06/2026</td>
+		<td class="lvTDeven" id="cell3_201">16/06/2026</td>
+		<td class="lvTDeven" id="cell4_201" style="text-align: right">12.00</td>
+		<td class="lvTDeven" id="cell5_201" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_201" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row202">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_202">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDodd" id="cell2_202">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_202">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_202" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_202" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_202" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row203">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_203">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDeven" id="cell2_203">05/01/2026</td>
+		<td class="lvTDeven" id="cell3_203">09/01/2026</td>
+		<td class="lvTDeven" id="cell4_203" style="text-align: right">5.00</td>
+		<td class="lvTDeven" id="cell5_203" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_203" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row204">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_204">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDodd" id="cell2_204">12/01/2026</td>
+		<td class="lvTDodd" id="cell3_204">12/01/2026</td>
+		<td class="lvTDodd" id="cell4_204" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_204" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_204" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row205">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_205">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDeven" id="cell2_205">26/02/2026</td>
+		<td class="lvTDeven" id="cell3_205">27/02/2026</td>
+		<td class="lvTDeven" id="cell4_205" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_205" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_205" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row206">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_206">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDodd" id="cell2_206">27/03/2026</td>
+		<td class="lvTDodd" id="cell3_206">27/03/2026</td>
+		<td class="lvTDodd" id="cell4_206" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_206" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_206" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row207">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_207">Skrzypczynski, Filip (40145)</td>
+		<td class="lvTDeven" id="cell2_207">30/03/2026</td>
+		<td class="lvTDeven" id="cell3_207">30/03/2026</td>
+		<td class="lvTDeven" id="cell4_207" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_207" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_207" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row208">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_208">Smythe, Gee (99998)</td>
+		<td class="lvTDodd" id="cell2_208">18/02/2026</td>
+		<td class="lvTDodd" id="cell3_208">18/02/2026</td>
+		<td class="lvTDodd" id="cell4_208" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_208" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_208" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row209">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_209">Smythe, Gee (99998)</td>
+		<td class="lvTDeven" id="cell2_209">18/06/2026</td>
+		<td class="lvTDeven" id="cell3_209">18/06/2026</td>
+		<td class="lvTDeven" id="cell4_209" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_209" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_209" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row210">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_210">Smythe, Gee (99998)</td>
+		<td class="lvTDodd" id="cell2_210">27/07/2026</td>
+		<td class="lvTDodd" id="cell3_210">28/07/2026</td>
+		<td class="lvTDodd" id="cell4_210" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_210" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_210" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row211">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_211">Smythe, Gee (99998)</td>
+		<td class="lvTDeven" id="cell2_211">20/08/2026</td>
+		<td class="lvTDeven" id="cell3_211">21/08/2026</td>
+		<td class="lvTDeven" id="cell4_211" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_211" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_211" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row212">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_212">Smythe, Gee (99998)</td>
+		<td class="lvTDodd" id="cell2_212">26/08/2026</td>
+		<td class="lvTDodd" id="cell3_212">28/08/2026</td>
+		<td class="lvTDodd" id="cell4_212" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_212" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_212" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row213">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_213">Smythe, Gee (99998)</td>
+		<td class="lvTDeven" id="cell2_213">24/12/2026</td>
+		<td class="lvTDeven" id="cell3_213">24/12/2026</td>
+		<td class="lvTDeven" id="cell4_213" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_213" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_213" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row214">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_214">Stephens, Chloe (27673)</td>
+		<td class="lvTDodd" id="cell2_214">02/01/2026</td>
+		<td class="lvTDodd" id="cell3_214">02/01/2026</td>
+		<td class="lvTDodd" id="cell4_214" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_214" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_214" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row215">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_215">Stephens, Chloe (27673)</td>
+		<td class="lvTDeven" id="cell2_215">08/01/2026</td>
+		<td class="lvTDeven" id="cell3_215">09/01/2026</td>
+		<td class="lvTDeven" id="cell4_215" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_215" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_215" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row216">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_216">Stephens, Chloe (27673)</td>
+		<td class="lvTDodd" id="cell2_216">27/01/2026</td>
+		<td class="lvTDodd" id="cell3_216">27/01/2026</td>
+		<td class="lvTDodd" id="cell4_216" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_216" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_216" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row217">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_217">Waterson, Kieron (27711)</td>
+		<td class="lvTDeven" id="cell2_217">02/01/2026</td>
+		<td class="lvTDeven" id="cell3_217">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_217" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_217" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_217" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row218">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_218">Waterson, Kieron (27711)</td>
+		<td class="lvTDodd" id="cell2_218">05/01/2026</td>
+		<td class="lvTDodd" id="cell3_218">07/01/2026</td>
+		<td class="lvTDodd" id="cell4_218" style="text-align: right">3.00</td>
+		<td class="lvTDodd" id="cell5_218" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_218" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row219">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_219">Waterson, Kieron (27711)</td>
+		<td class="lvTDeven" id="cell2_219">08/01/2026</td>
+		<td class="lvTDeven" id="cell3_219">08/01/2026</td>
+		<td class="lvTDeven" id="cell4_219" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_219" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_219" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row220">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_220">Waterson, Kieron (27711)</td>
+		<td class="lvTDodd" id="cell2_220">20/04/2026</td>
+		<td class="lvTDodd" id="cell3_220">20/04/2026</td>
+		<td class="lvTDodd" id="cell4_220" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_220" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_220" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row221">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_221">Waterson, Kieron (27711)</td>
+		<td class="lvTDeven" id="cell2_221">12/05/2026</td>
+		<td class="lvTDeven" id="cell3_221">12/05/2026</td>
+		<td class="lvTDeven" id="cell4_221" style="text-align: right">0.50</td>
+		<td class="lvTDeven" id="cell5_221" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_221" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row222">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_222">Waterson, Kieron (27711)</td>
+		<td class="lvTDodd" id="cell2_222">19/05/2026</td>
+		<td class="lvTDodd" id="cell3_222">22/05/2026</td>
+		<td class="lvTDodd" id="cell4_222" style="text-align: right">4.00</td>
+		<td class="lvTDodd" id="cell5_222" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_222" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row223">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_223">Waterson, Kieron (27711)</td>
+		<td class="lvTDeven" id="cell2_223">26/05/2026</td>
+		<td class="lvTDeven" id="cell3_223">03/06/2026</td>
+		<td class="lvTDeven" id="cell4_223" style="text-align: right">7.00</td>
+		<td class="lvTDeven" id="cell5_223" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_223" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row224">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_224">Webster, Joanne (100003)</td>
+		<td class="lvTDodd" id="cell2_224">10/03/2026</td>
+		<td class="lvTDodd" id="cell3_224">19/03/2026</td>
+		<td class="lvTDodd" id="cell4_224" style="text-align: right">8.00</td>
+		<td class="lvTDodd" id="cell5_224" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_224" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row225">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_225">Webster, Joanne (100003)</td>
+		<td class="lvTDeven" id="cell2_225">14/04/2026</td>
+		<td class="lvTDeven" id="cell3_225">16/04/2026</td>
+		<td class="lvTDeven" id="cell4_225" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_225" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_225" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row226">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_226">Webster, Joanne (100003)</td>
+		<td class="lvTDodd" id="cell2_226">01/05/2026</td>
+		<td class="lvTDodd" id="cell3_226">01/05/2026</td>
+		<td class="lvTDodd" id="cell4_226" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_226" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_226" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row227">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_227">Webster, Joanne (100003)</td>
+		<td class="lvTDeven" id="cell2_227">07/08/2026</td>
+		<td class="lvTDeven" id="cell3_227">10/08/2026</td>
+		<td class="lvTDeven" id="cell4_227" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_227" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_227" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row228">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_228">Webster, Joanne (100003)</td>
+		<td class="lvTDodd" id="cell2_228">21/10/2026</td>
+		<td class="lvTDodd" id="cell3_228">30/10/2026</td>
+		<td class="lvTDodd" id="cell4_228" style="text-align: right">8.00</td>
+		<td class="lvTDodd" id="cell5_228" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_228" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row229">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_229">Wilson, Dom (27712)</td>
+		<td class="lvTDeven" id="cell2_229">22/12/2025</td>
+		<td class="lvTDeven" id="cell3_229">05/01/2026</td>
+		<td class="lvTDeven" id="cell4_229" style="text-align: right">8.00</td>
+		<td class="lvTDeven" id="cell5_229" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_229" style="text-align: right">*</td>
+	</tr>
+	<tr class="lvTRodd" id="row230">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_230">Wilson, Dom (27712)</td>
+		<td class="lvTDodd" id="cell2_230">30/01/2026</td>
+		<td class="lvTDodd" id="cell3_230">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_230" style="text-align: right">0.50</td>
+		<td class="lvTDodd" id="cell5_230" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_230" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row231">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_231">Wilson, Dom (27712)</td>
+		<td class="lvTDeven" id="cell2_231">02/04/2026</td>
+		<td class="lvTDeven" id="cell3_231">02/04/2026</td>
+		<td class="lvTDeven" id="cell4_231" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_231" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_231" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row232">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_232">Wilson, Dom (27712)</td>
+		<td class="lvTDodd" id="cell2_232">20/07/2026</td>
+		<td class="lvTDodd" id="cell3_232">31/07/2026</td>
+		<td class="lvTDodd" id="cell4_232" style="text-align: right">10.00</td>
+		<td class="lvTDodd" id="cell5_232" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_232" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row233">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_233">Wolage, Robert (28774)</td>
+		<td class="lvTDeven" id="cell2_233">02/01/2026</td>
+		<td class="lvTDeven" id="cell3_233">02/01/2026</td>
+		<td class="lvTDeven" id="cell4_233" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_233" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_233" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row234">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_234">Wolage, Robert (28774)</td>
+		<td class="lvTDodd" id="cell2_234">12/01/2026</td>
+		<td class="lvTDodd" id="cell3_234">12/01/2026</td>
+		<td class="lvTDodd" id="cell4_234" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_234" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_234" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row235">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_235">Wolage, Robert (28774)</td>
+		<td class="lvTDeven" id="cell2_235">19/01/2026</td>
+		<td class="lvTDeven" id="cell3_235">19/01/2026</td>
+		<td class="lvTDeven" id="cell4_235" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_235" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_235" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row236">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_236">Wolage, Robert (28774)</td>
+		<td class="lvTDodd" id="cell2_236">26/01/2026</td>
+		<td class="lvTDodd" id="cell3_236">26/01/2026</td>
+		<td class="lvTDodd" id="cell4_236" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_236" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_236" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row237">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_237">Wolage, Robert (28774)</td>
+		<td class="lvTDeven" id="cell2_237">07/04/2026</td>
+		<td class="lvTDeven" id="cell3_237">08/04/2026</td>
+		<td class="lvTDeven" id="cell4_237" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_237" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_237" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row238">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_238">Wolage, Robert (28774)</td>
+		<td class="lvTDodd" id="cell2_238">27/04/2026</td>
+		<td class="lvTDodd" id="cell3_238">27/04/2026</td>
+		<td class="lvTDodd" id="cell4_238" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_238" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_238" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row239">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_239">Wolage, Robert (28774)</td>
+		<td class="lvTDeven" id="cell2_239">05/05/2026</td>
+		<td class="lvTDeven" id="cell3_239">06/05/2026</td>
+		<td class="lvTDeven" id="cell4_239" style="text-align: right">2.00</td>
+		<td class="lvTDeven" id="cell5_239" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_239" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row240">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_240">Wolage, Robert (28774)</td>
+		<td class="lvTDodd" id="cell2_240">18/06/2026</td>
+		<td class="lvTDodd" id="cell3_240">19/06/2026</td>
+		<td class="lvTDodd" id="cell4_240" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_240" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_240" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row241">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_241">Wolage, Robert (28774)</td>
+		<td class="lvTDeven" id="cell2_241">28/08/2026</td>
+		<td class="lvTDeven" id="cell3_241">02/09/2026</td>
+		<td class="lvTDeven" id="cell4_241" style="text-align: right">3.00</td>
+		<td class="lvTDeven" id="cell5_241" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_241" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row242">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_242">Woznica, Tomasz (100039)</td>
+		<td class="lvTDodd" id="cell2_242">29/01/2026</td>
+		<td class="lvTDodd" id="cell3_242">30/01/2026</td>
+		<td class="lvTDodd" id="cell4_242" style="text-align: right">2.00</td>
+		<td class="lvTDodd" id="cell5_242" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_242" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row243">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_243">Woznica, Tomasz (100039)</td>
+		<td class="lvTDeven" id="cell2_243">13/04/2026</td>
+		<td class="lvTDeven" id="cell3_243">13/04/2026</td>
+		<td class="lvTDeven" id="cell4_243" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_243" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_243" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRodd" id="row244">
+		<td class="lvTRodd">&nbsp;</td>
+		<td class="lvTDodd" id="cell1_244">Woznica, Tomasz (100039)</td>
+		<td class="lvTDodd" id="cell2_244">22/05/2026</td>
+		<td class="lvTDodd" id="cell3_244">22/05/2026</td>
+		<td class="lvTDodd" id="cell4_244" style="text-align: right">1.00</td>
+		<td class="lvTDodd" id="cell5_244" style="text-align: right">&nbsp;</td>
+		<td class="lvTDodd" id="cell8_244" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTReven" id="row245">
+		<td class="lvTReven">&nbsp;</td>
+		<td class="lvTDeven" id="cell1_245">Woznica, Tomasz (100039)</td>
+		<td class="lvTDeven" id="cell2_245">29/05/2026</td>
+		<td class="lvTDeven" id="cell3_245">29/05/2026</td>
+		<td class="lvTDeven" id="cell4_245" style="text-align: right">1.00</td>
+		<td class="lvTDeven" id="cell5_245" style="text-align: right">&nbsp;</td>
+		<td class="lvTDeven" id="cell8_245" style="text-align: right">&nbsp;</td>
+	</tr>
+	<tr class="lvTRsub">
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub">&nbsp;</td>
+		<td class="lvTDsub" style="text-align:right">671.00</td>
+		<td class="lvTDsub" style="text-align:right">&nbsp;</td>
+		<td class="lvTDsub" style="text-align:right">&nbsp;</td>
+	</tr>
+</tbody>
+<tfoot>
+	<tr class="lvTRtotal">
+		<td class="lvTDtotal">&nbsp;</td>
+		<td class="lvTDtotal">&nbsp;</td>
+		<td class="lvTDtotal">&nbsp;</td>
+		<td class="lvTDtotal">&nbsp;</td>
+		<td class="lvTDtotal" style="text-align:right">678.00</td>
+		<td class="lvTDtotal" style="text-align:right">&nbsp;</td>
+		<td class="lvTDtotal" style="text-align:right">&nbsp;</td>
+	</tr>
+</tfoot>
+</table>
