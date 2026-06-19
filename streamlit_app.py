@@ -4,8 +4,10 @@ import pandas as pd
 import streamlit as st
 from app.data.db import initialize_database, rows, execute
 from app.importers.csv_xlsx import TABLE_COLUMNS, read_upload, validate, import_dataframe
+from app.importers.workbook import profile_workbook, profiles_to_frame
 from app.services.alerts import save_alerts
 from app.services.forecasting import project_forecasts, save_forecasts
+from app.services.planning import week_starts, spread_hours, save_weekly_demand, gap_analysis, discipline_metrics
 
 st.set_page_config(page_title='Production Capacity Planner', layout='wide')
 initialize_database()
@@ -25,11 +27,93 @@ def user_header():
     return selected, role
 
 user, role = user_header(); can_edit = role in ('CDO','Manager')
-page = st.sidebar.radio('View', ['Dashboard','Team capacity','Project view','People allocation','Allocation editor','Import / export','Audit log','Architecture & roadmap'])
+page = st.sidebar.radio('View', ['Manager dashboard','Planning mode','Allocation mode','Gap analysis','Dashboard','Team capacity','Project view','People allocation','Allocation editor','Import / export','Audit log','Architecture & roadmap'])
 start = st.sidebar.date_input('Start date', week_start(date.today()))
 end = st.sidebar.date_input('End date', start + timedelta(days=6))
 
-if page == 'Dashboard':
+if page == 'Manager dashboard':
+    st.title('Manager dashboard')
+    discipline = st.selectbox('Discipline page', ['RS','GIS','PLS'])
+    today = date.today(); periods = {'This week': (week_start(today), week_start(today)+timedelta(days=6)), 'Next week': (week_start(today)+timedelta(days=7), week_start(today)+timedelta(days=13)), 'Next 4 weeks': (week_start(today), week_start(today)+timedelta(days=27))}
+    cols = st.columns(3)
+    for col, (label, (ps, pe)) in zip(cols, periods.items()):
+        m = discipline_metrics(discipline, str(ps), str(pe))
+        with col:
+            st.subheader(label)
+            st.metric('Available', f"{m['available']:.1f}h")
+            st.metric('Allocated', f"{m['allocated']:.1f}h")
+            st.metric('Unallocated', f"{m['unallocated']:.1f}h")
+            st.metric('Overallocated', f"{m['overallocated']:.1f}h")
+    risks = pd.DataFrame([f for f in project_forecasts(str(periods['Next 4 weeks'][1])) if f['deadline_risk'] != 'Low' or (f['variance_hours'] and f['variance_hours'] > 0)])
+    st.subheader(f'{discipline} projects at risk')
+    st.dataframe(risks, use_container_width=True)
+
+elif page == 'Planning mode':
+    st.title('Planning mode')
+    if not can_edit: st.warning('PM users are view/export only.')
+    projects=q('SELECT id,project_name FROM projects ORDER BY project_name'); disciplines=q('SELECT id,code FROM disciplines ORDER BY code')
+    with st.form('demand_spread'):
+        project_name=st.selectbox('Project', projects.project_name)
+        disc_code=st.selectbox('Discipline', disciplines.code)
+        total=st.number_input('Total planned demand hours to spread', min_value=0.0, step=7.5, value=37.5)
+        ds=st.date_input('Demand start', start); de=st.date_input('Demand end', end)
+        mode=st.radio('Spread method', ['Even spread','Front-loaded','Back-loaded','Manual weekly spread'], horizontal=True)
+        weeks=week_starts(ds,de); manual=[]
+        if mode == 'Manual weekly spread':
+            st.caption('Enter hours per week. Total can intentionally differ when managers are revising demand.')
+            for w in weeks:
+                manual.append(st.number_input(f'Week {w.isoformat()}', min_value=0.0, step=1.0, key=f'manual_{w}'))
+        reason=st.text_input('Reason/comment', key='planning_reason')
+        submitted=st.form_submit_button('Save weekly demand', disabled=not can_edit)
+    preview=spread_hours(total,weeks,mode,manual if mode == 'Manual weekly spread' else None)
+    st.subheader('Demand preview')
+    st.dataframe(pd.DataFrame({'week_start':[w.isoformat() for w in weeks], 'demand_hours': preview}), use_container_width=True)
+    if submitted:
+        save_weekly_demand(int(projects.loc[projects.project_name==project_name,'id'].iloc[0]), int(disciplines.loc[disciplines.code==disc_code,'id'].iloc[0]), weeks, preview, user, reason)
+        st.success('Weekly demand saved.')
+
+elif page == 'Allocation mode':
+    st.title('Allocation mode')
+    if not can_edit: st.warning('PM users are view/export only.'); st.stop()
+    disc=st.selectbox('Discipline', ['RS','GIS','PLS'])
+    gaps=gap_analysis(str(start), str(end), disc)
+    st.subheader('Project demand to fill')
+    demand_df=pd.DataFrame(gaps['demand']); st.dataframe(demand_df, use_container_width=True)
+    st.subheader('Available people in discipline')
+    people=q('''SELECT pe.id,pe.name,pe.daily_hours FROM people pe JOIN disciplines d ON d.id=pe.discipline_id WHERE d.code=? AND pe.active=1 ORDER BY pe.name''',(disc,))
+    st.dataframe(people, use_container_width=True)
+    projects=q('SELECT id,project_name FROM projects WHERE status="Active" ORDER BY project_name')
+    with st.form('assign_demand'):
+        person=st.selectbox('Assign person', people.name)
+        project=st.selectbox('To project demand', projects.project_name)
+        full=st.radio('Allocation size', ['Full day','50/50 split'], horizontal=True)
+        astart=st.date_input('Assign start', start, key='am_start'); aend=st.date_input('Assign end', end, key='am_end')
+        overwrite=st.checkbox('Confirm overwrite of existing allocations', key='am_overwrite')
+        reason=st.text_input('Reason/comment', key='am_reason')
+        go=st.form_submit_button('Assign')
+    if go:
+        pid=int(people.loc[people.name==person,'id'].iloc[0]); daily=float(people.loc[people.name==person,'daily_hours'].iloc[0]); pr=int(projects.loc[projects.project_name==project,'id'].iloc[0]); hrs=daily if full=='Full day' else daily/2; cur=astart; saved=0
+        while cur<=aend:
+            if cur.weekday()<5:
+                existing=rows('SELECT * FROM daily_allocations WHERE person_id=? AND allocation_date=? AND split_slot=1',(pid,str(cur)))
+                if existing and not overwrite: st.error(f'Skipped {cur}: existing allocation.'); cur+=timedelta(days=1); continue
+                if overwrite: execute('DELETE FROM daily_allocations WHERE person_id=? AND allocation_date=? AND split_slot=1',(pid,str(cur)),user=user,audit={'object_type':'DailyAllocation','action':'delete','previous':existing,'reason':reason})
+                execute('INSERT OR REPLACE INTO daily_allocations(person_id,allocation_date,project_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?)',(pid,str(cur),pr,1,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'assign_to_demand','new':{'person':person,'project':project,'date':str(cur),'hours':hrs},'reason':reason}); saved+=1
+            cur+=timedelta(days=1)
+        st.success(f'Assigned {saved} working days.')
+
+elif page == 'Gap analysis':
+    st.title('Gap analysis')
+    disc=st.selectbox('Discipline filter', ['All','RS','GIS','PLS'])
+    gaps=gap_analysis(str(start), str(end), None if disc=='All' else disc)
+    st.subheader('Demand vs assigned capacity and unfilled demand')
+    st.dataframe(pd.DataFrame(gaps['demand']), use_container_width=True)
+    st.subheader('People without work')
+    st.dataframe(pd.DataFrame(gaps['unassigned_people']), use_container_width=True)
+    st.subheader('Overallocated people')
+    st.dataframe(pd.DataFrame(gaps['overallocated_people']), use_container_width=True)
+
+elif page == 'Dashboard':
     alerts = save_alerts(str(start), str(end)); save_forecasts(str(end))
     c = q('''SELECT COALESCE(SUM(available_hours),0) available, COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations WHERE allocation_date BETWEEN ? AND ?),0) allocated FROM availability_calendar WHERE work_date BETWEEN ? AND ?''', (str(start),str(end),str(start),str(end)))
     available=float(c.available.iloc[0]); allocated=float(c.allocated.iloc[0]); over=max(allocated-available,0)
@@ -87,6 +171,12 @@ elif page == 'Import / export':
         elif st.button('Import validated file'):
             st.success(f'Imported {import_dataframe(df, import_type, user)} rows.')
     elif file: st.warning('PM users can preview and export only.')
+    st.subheader('Workbook structure support')
+    wb_file=st.file_uploader('Analyse current capacity workbook (.xlsx)', type=['xlsx'], key='workbook_profile')
+    if wb_file:
+        profiles=profiles_to_frame(profile_workbook(wb_file))
+        st.dataframe(profiles, use_container_width=True)
+        st.info('Use this profile to map workbook tabs into controlled imports: people/roster, project demand, person allocations, OSR actuals/progress, leave and holidays. The requested /sample-data/2PROD Capacity plan 2026.xlsx file was not present in this workspace, so this analyser is included for the same workbook structure when available.')
     st.subheader('Exports'); export=q('SELECT * FROM projects')
     st.download_button('Download projects CSV', export.to_csv(index=False), 'projects_export.csv')
 

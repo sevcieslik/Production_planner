@@ -122,3 +122,32 @@ The schema includes `user_roles` so proper authentication and role-based access 
 ## Notes on the current workbook
 
 The workbook was not available inside this Codex workspace, so the MVP uses the workflow and naming patterns described in the request rather than recreating workbook tabs directly.
+
+## Planning workflow improvements
+
+### Planning mode
+
+Managers can choose a project, discipline, date range and total planned demand hours, then spread those hours by week using:
+
+- even spread
+- front-loaded spread
+- back-loaded spread
+- manual weekly spread
+
+Saved demand is written to `weekly_demand` and audited.
+
+### Allocation mode
+
+Managers can filter available people by RS/GIS/PLS, view open project demand, and assign a person to a project across a date range. Allocation supports full-day assignment and 50/50 split sizing. Existing allocations are skipped unless overwrite is explicitly confirmed.
+
+### Gap analysis
+
+Gap analysis compares project demand to assigned capacity by week, highlights unfilled demand, lists people with available time but no work, and shows overallocated people.
+
+### Manager dashboard
+
+The Manager dashboard provides one page per discipline for RS, GIS and PLS. It summarises this week, next week and the next four weeks with available, allocated, unallocated and overallocated hours, plus projects at forecast/deadline risk.
+
+### Workbook structure support
+
+The requested `/sample-data/2PROD Capacity plan 2026.xlsx` workbook was not present in this Codex workspace. To support that structure when available, the Import / export screen includes a workbook analyser that profiles each sheet, detects likely workflow roles such as roster, demand, allocation, OSR, leave or holidays, and provides a mapping summary for controlled imports rather than recreating fragile spreadsheet formulas.
