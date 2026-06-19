@@ -17,9 +17,14 @@ from app.services.mvp import (
     capacity_balance,
     ensure_mvp_schema,
     get_projects,
+    get_holidays,
     get_resources,
+    import_approved_holidays,
     import_default_projects,
+    import_sample_roster,
     prepare_date_columns_for_editor,
+    recalculate_holiday_totals,
+    save_holidays,
     save_projects,
     save_resources,
     seed_resources_from_people,
@@ -48,7 +53,7 @@ st.sidebar.title("Production Planner")
 st.sidebar.caption("Local-first three-tab MVP")
 
 start = st.sidebar.date_input("Planning start", monday(date.today()))
-end = st.sidebar.date_input("Planning end", start + timedelta(days=84))
+end = st.sidebar.date_input("Planning end", date(2026, 12, 31))
 weeks = week_starts(start, end)
 
 tab_projects, tab_resources, tab_allocations = st.tabs(
@@ -135,6 +140,32 @@ with tab_resources:
         )
         rerun()
 
+    c_roster, c_holidays, c_recalc = st.columns(3)
+    if c_roster.button("Import sample roster"):
+        result = import_sample_roster()
+        st.success(f"Imported {result.imported_people_count} new people and updated {result.updated_people_count} people.")
+        if result.validation_issues:
+            st.warning("Validation issues: " + "; ".join(result.validation_issues[:10]))
+        if result.skipped_rows:
+            st.warning(f"Skipped {result.skipped_rows} roster rows.")
+        rerun()
+
+    if c_holidays.button("Import approved holidays"):
+        result = import_approved_holidays()
+        st.success(f"Imported {result.imported_holiday_records_count} holiday records.")
+        if result.unmatched_holiday_names:
+            st.warning("Unmatched holiday names: " + ", ".join(result.unmatched_holiday_names[:20]))
+        if result.validation_issues:
+            st.warning("Validation issues: " + "; ".join(result.validation_issues[:10]))
+        if result.skipped_rows:
+            st.warning(f"Skipped {result.skipped_rows} holiday rows.")
+        rerun()
+
+    if c_recalc.button("Recalculate holiday totals"):
+        updated = recalculate_holiday_totals()
+        st.success(f"Recalculated holiday totals for {updated} resources.")
+        rerun()
+
     rdf = get_resources()
     if rdf.empty:
         rdf = pd.DataFrame(columns=RESOURCE_FIELDS)
@@ -184,6 +215,35 @@ with tab_resources:
             """,
             (rid, dept, ds.isoformat(), de.isoformat()),
         )
+        rerun()
+
+    st.subheader("Holiday log")
+    fc1, fc2, fc3, fc4 = st.columns(4)
+    dept_filter = fc1.selectbox("Holiday department", ["All"] + DISCIPLINES)
+    person_filter = fc2.selectbox("Holiday person", ["All"] + names) if names else "All"
+    holiday_start = fc3.date_input("Holiday from", start, key="holiday_from")
+    holiday_end = fc4.date_input("Holiday to", date(2026, 12, 31), key="holiday_to")
+    holidays = get_holidays(dept_filter, person_filter, holiday_start.isoformat(), holiday_end.isoformat())
+    if holidays.empty:
+        holidays = pd.DataFrame(columns=["id", "person_name", "department", "holiday_date", "hours", "source", "notes"])
+    holiday_editor_df = prepare_date_columns_for_editor(holidays, ["holiday_date"])
+    hedited = st.data_editor(
+        holiday_editor_df,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        column_config={"holiday_date": st.column_config.DateColumn()},
+    )
+    hc1, hc2 = st.columns(2)
+    if hc1.button("Save holiday changes"):
+        save_holidays(hedited.to_dict("records"))
+        st.success("Holiday records saved.")
+        rerun()
+    delete_holiday_id = hc2.number_input("Delete holiday record id", min_value=0, step=1)
+    if hc2.button("Delete holiday record", disabled=delete_holiday_id <= 0):
+        execute("DELETE FROM holidays WHERE id=?", (int(delete_holiday_id),))
+        recalculate_holiday_totals()
+        st.warning(f"Deleted holiday record {int(delete_holiday_id)}.")
         rerun()
 
 

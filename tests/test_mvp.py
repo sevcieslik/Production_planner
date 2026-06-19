@@ -12,12 +12,15 @@ from app.services.mvp import (
     PROJECT_DATE_COLUMNS,
     RESOURCE_DATE_COLUMNS,
     capacity_balance,
+    import_approved_holidays,
     import_default_projects,
+    import_sample_roster,
     load_projects_csv,
     normalise_date_for_db,
     prepare_date_columns_for_editor,
     save_projects,
     save_resources,
+    recalculate_holiday_totals,
     weekly_department_capacity,
     weekly_project_demand,
 )
@@ -225,7 +228,7 @@ class MvpWorkflowTests(unittest.TestCase):
         self.assertEqual(float(cap[(cap.department == "GIS")].available_capacity.iloc[0]), 34.0)
         self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 0.0)
 
-    def test_holiday_reduction(self):
+    def test_holiday_booked_total_is_not_subtracted_each_week(self):
         save_resources(
             [
                 {
@@ -239,7 +242,39 @@ class MvpWorkflowTests(unittest.TestCase):
             ]
         )
         cap = weekly_department_capacity([date(2026, 1, 5)])
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 34.0)
+
+    def test_holiday_records_reduce_weekly_capacity(self):
+        save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
+        rid = db.rows('SELECT id FROM mvp_resources WHERE person_name="A"')[0]["id"]
+        db.execute('INSERT INTO holidays(resource_id,person_name,holiday_date,hours,source) VALUES (?,?,?,?,?)', (rid, "A", "2026-01-06", 8, "test"))
+        cap = weekly_department_capacity([date(2026, 1, 5)])
         self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 27.2)
+
+    def test_roster_csv_import_creates_resources_and_daily_hours_converts(self):
+        path = Path(self.tmp.name) / "roster.csv"
+        path.write_text("Name,Team,Daily Hours\nDaily Person,GIS,7.5\n")
+        result = import_sample_roster(path)
+        self.assertEqual(result.imported_people_count, 1)
+        saved = db.rows('SELECT department,weekly_hours,active_status FROM mvp_resources WHERE person_name="Daily Person"')[0]
+        self.assertEqual(saved["department"], "GIS")
+        self.assertEqual(saved["weekly_hours"], 37.5)
+        self.assertEqual(saved["active_status"], "active")
+
+    def test_approved_holidays_import_expands_ranges_and_reports_unmatched(self):
+        save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
+        path = Path(self.tmp.name) / "holidays.csv"
+        path.write_text("Employee,Date From,Date To,Days of Absence\nA,05/01/2026,07/01/2026,3\nMissing,05/01/2026,05/01/2026,1\n")
+        result = import_approved_holidays(path)
+        self.assertEqual(result.imported_holiday_records_count, 3)
+        self.assertIn("Missing", result.unmatched_holiday_names)
+        self.assertEqual(len(db.rows('SELECT * FROM holidays WHERE person_name="A"')), 3)
+        cap = weekly_department_capacity([date(2026, 1, 5)])
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 13.6)
+
+    def test_planning_weeks_generate_through_end_of_2026(self):
+        weeks = week_starts(date(2026, 1, 1), date(2026, 12, 31))
+        self.assertEqual(weeks[-1], date(2026, 12, 28))
 
     def test_even_front_and_back_loaded_spreads(self):
         weeks = week_starts(date(2026, 1, 5), date(2026, 1, 25))
