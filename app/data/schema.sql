@@ -87,6 +87,21 @@ CREATE TABLE IF NOT EXISTS project_discipline_budgets (
   UNIQUE(project_id, discipline_id)
 );
 
+
+CREATE TABLE IF NOT EXISTS project_discipline_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  discipline_id INTEGER NOT NULL REFERENCES disciplines(id),
+  planned_hours REAL NOT NULL DEFAULT 0,
+  earliest_start_date TEXT,
+  target_end_date TEXT,
+  loading_method TEXT NOT NULL DEFAULT 'Even spread' CHECK(loading_method IN ('Even spread','Front-loaded','Back-loaded','Manual weekly spread','manual','even spread','front-loaded','back-loaded')),
+  notes TEXT,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, discipline_id)
+);
+
 CREATE TABLE IF NOT EXISTS project_schedules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
