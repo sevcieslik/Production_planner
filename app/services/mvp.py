@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date, timedelta
+from html.parser import HTMLParser
+import re
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -130,6 +133,7 @@ def ensure_mvp_schema() -> None:
               holiday_date TEXT NOT NULL,
               hours REAL NOT NULL DEFAULT 0,
               source TEXT DEFAULT 'manual',
+              notes TEXT,
               UNIQUE(person_name, holiday_date, source)
             );
 
@@ -138,10 +142,16 @@ def ensure_mvp_schema() -> None:
               value TEXT NOT NULL
             );
 
+            -- harmless when created on a fresh database; ignored below for existing DBs
+
             INSERT OR IGNORE INTO settings(key,value)
             VALUES ('diminished_capacity_factor','0.85');
             """
         )
+        try:
+            conn.execute("ALTER TABLE holidays ADD COLUMN notes TEXT")
+        except Exception:
+            pass
 
 
 def prepare_date_columns_for_editor(
@@ -344,6 +354,191 @@ def get_projects(include_archived: bool = True) -> pd.DataFrame:
     )
 
 
+
+@dataclass
+class MvpImportResult:
+    imported_people_count: int = 0
+    updated_people_count: int = 0
+    imported_holiday_records_count: int = 0
+    unmatched_holiday_names: list[str] = field(default_factory=list)
+    skipped_rows: int = 0
+    validation_issues: list[str] = field(default_factory=list)
+
+
+def _column_map(columns: Iterable[object]) -> dict[str, str]:
+    aliases = {
+        "person_name": ["person_name", "name", "employee", "employee_name"],
+        "department": ["department", "team", "discipline_code", "discipline"],
+        "weekly_hours": ["weekly_hours", "weekly hours", "hrs", "hours", "contracted_hours"],
+        "daily_hours": ["daily_hours", "daily hours"],
+        "holiday_remaining_hours": ["holiday_remaining_hours", "holiday remaining hours", "remaining_holiday_hours"],
+        "start_date": ["start_date", "date_from", "date from", "from", "holiday_date", "date"],
+        "end_date": ["end_date", "date_to", "date to", "to"],
+        "hours": ["hours", "hours_of_absence", "hours of absence", "duration_hours"],
+        "days": ["days", "days_of_absence", "days of absence", "duration_days"],
+        "notes": ["notes", "note", "reason"],
+    }
+    norm = {re.sub(r"[^a-z0-9]+", "_", str(c).strip().lower()).strip("_"): str(c) for c in columns}
+    out = {}
+    for target, names in aliases.items():
+        for name in names:
+            key = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+            if key in norm:
+                out[target] = norm[key]
+                break
+    return out
+
+
+def _department(value: Any) -> str | None:
+    v = str(value or "").strip().upper()
+    if v in DISCIPLINES:
+        return v
+    if "GIS" in v:
+        return "GIS"
+    if "PLS" in v or v.startswith("P"):
+        return "PLS"
+    if "RS" in v or "REMOTE" in v or "SURVEY" in v:
+        return "RS"
+    return None
+
+
+def _number(value: Any, default: float = 0.0) -> float:
+    n = pd.to_numeric(value, errors="coerce")
+    return default if pd.isna(n) else float(n)
+
+
+def _read_sample_table(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    if path.read_bytes().lstrip().lower().startswith(b"<table"):
+        class Parser(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.rows=[]; self.row=[]; self.buf=[]; self.cell=False
+            def handle_starttag(self, tag, attrs):
+                if tag == "tr": self.row=[]
+                if tag in ("td", "th"): self.cell=True; self.buf=[]
+            def handle_data(self, data):
+                if self.cell: self.buf.append(data)
+            def handle_endtag(self, tag):
+                if tag in ("td", "th") and self.cell:
+                    self.row.append(" ".join("".join(self.buf).split())); self.cell=False
+                if tag == "tr" and self.row: self.rows.append(self.row)
+        parser = Parser(); parser.feed(path.read_text(errors="ignore"))
+        header = parser.rows[0]
+        data = [r for r in parser.rows[1:] if any(c.strip() for c in r)]
+        width = len(header)
+        return pd.DataFrame([r[:width] + [""] * max(width - len(r), 0) for r in data], columns=header)
+    return pd.read_excel(path)
+
+
+def load_roster_csv(path: str | Path = "sample-data/roster.csv") -> pd.DataFrame:
+    df = _read_sample_table(path)
+    cmap = _column_map(df.columns)
+    out = []
+    for _, row in df.iterrows():
+        name = str(row.get(cmap.get("person_name", ""), "")).strip()
+        dept = _department(row.get(cmap.get("department", ""), ""))
+        weekly = _number(row.get(cmap.get("weekly_hours", ""), None), None)
+        daily = _number(row.get(cmap.get("daily_hours", ""), None), None)
+        if weekly is None and daily is not None:
+            weekly = daily * 5
+        out.append({"person_name": name, "department": dept, "weekly_hours": weekly, "holiday_booked_hours": 0, "holiday_remaining_hours": _number(row.get(cmap.get("holiday_remaining_hours", ""), 0)), "active_status": "active"})
+    return pd.DataFrame(out)
+
+
+def import_sample_roster(path: str | Path = "sample-data/roster.csv") -> MvpImportResult:
+    ensure_mvp_schema(); result = MvpImportResult(); records=[]
+    existing = {r["person_name"] for r in rows("SELECT person_name FROM mvp_resources")}
+    for i, r in load_roster_csv(path).iterrows():
+        if not r.get("person_name"):
+            result.skipped_rows += 1; result.validation_issues.append(f"row {i+2}: missing person name"); continue
+        if pd.isna(r.get("department")) or r.get("department") not in DISCIPLINES:
+            result.skipped_rows += 1; result.validation_issues.append(f"{r.get('person_name')}: missing department"); continue
+        if pd.isna(r.get("weekly_hours")) or r.get("weekly_hours") is None or float(r.get("weekly_hours") or 0) <= 0:
+            result.validation_issues.append(f"{r.get('person_name')}: missing weekly hours")
+        records.append(r.to_dict())
+        if r["person_name"] in existing: result.updated_people_count += 1
+        else: result.imported_people_count += 1
+    save_resources(records)
+    return result
+
+
+def _parse_date(value: Any) -> date | None:
+    parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+    return None if pd.isna(parsed) else parsed.date()
+
+
+def _working_days(start: date, end: date) -> list[date]:
+    out=[]; cur=start
+    while cur <= end:
+        if cur.weekday() < 5: out.append(cur)
+        cur += timedelta(days=1)
+    return out
+
+
+def import_approved_holidays(path: str | Path = "sample-data/Employee Holiday - Approved - From 01_01_2026 to 31_12_2026 .xls") -> MvpImportResult:
+    ensure_mvp_schema(); result = MvpImportResult(); df = _read_sample_table(path); cmap = _column_map(df.columns)
+    with connect() as conn:
+        people = {r["person_name"].strip().lower(): r for r in conn.execute("SELECT * FROM mvp_resources").fetchall()}
+        seen=set()
+        for i, row in df.iterrows():
+            name = str(row.get(cmap.get("person_name", ""), "")).strip()
+            if not name: continue
+            person = people.get(name.lower())
+            if not person:
+                result.unmatched_holiday_names.append(name); result.skipped_rows += 1; continue
+            start = _parse_date(row.get(cmap.get("start_date", "")))
+            end = _parse_date(row.get(cmap.get("end_date", ""))) or start
+            if not start:
+                result.skipped_rows += 1; result.validation_issues.append(f"{name}: missing holiday date"); continue
+            days = _working_days(start, end)
+            total_hours = _number(row.get(cmap.get("hours", ""), None), None)
+            if total_hours is None:
+                duration_days = _number(row.get(cmap.get("days", ""), None), None)
+                per_day = float(person["weekly_hours"] or 0) / 5
+                total_hours = per_day * (duration_days if duration_days is not None and len(days) <= 1 else len(days))
+            hours_per_day = total_hours / max(len(days), 1)
+            for d in days:
+                if d.year != 2026: result.validation_issues.append(f"{name}: holiday outside 2026 on {d.isoformat()}")
+                if hours_per_day < 0: result.validation_issues.append(f"{name}: negative holiday hours on {d.isoformat()}"); continue
+                key=(name.lower(), d.isoformat())
+                if key in seen: result.validation_issues.append(f"{name}: duplicate holiday on {d.isoformat()}")
+                seen.add(key)
+                cur = conn.execute("INSERT OR IGNORE INTO holidays(resource_id,person_name,holiday_date,hours,source,notes) VALUES (?,?,?,?,?,?)", (person["id"], name, d.isoformat(), round(hours_per_day,2), "sample-approved", str(row.get(cmap.get("notes", ""), "")).strip())).rowcount
+                if cur: result.imported_holiday_records_count += 1
+    recalculate_holiday_totals()
+    result.unmatched_holiday_names = sorted(set(result.unmatched_holiday_names))
+    return result
+
+
+def recalculate_holiday_totals() -> int:
+    ensure_mvp_schema()
+    with connect() as conn:
+        conn.execute("UPDATE mvp_resources SET holiday_booked_hours=COALESCE((SELECT SUM(hours) FROM holidays h WHERE lower(h.person_name)=lower(mvp_resources.person_name)),0), updated_at=datetime('now')")
+        return conn.execute("SELECT changes() c").fetchone()["c"]
+
+
+def get_holidays(department: str | None = None, person_name: str | None = None, start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
+    ensure_mvp_schema(); wh=[]; params=[]
+    if department and department != "All": wh.append("r.department=?"); params.append(department)
+    if person_name and person_name != "All": wh.append("h.person_name=?"); params.append(person_name)
+    if start_date: wh.append("h.holiday_date>=?"); params.append(start_date)
+    if end_date: wh.append("h.holiday_date<=?"); params.append(end_date)
+    where = "WHERE " + " AND ".join(wh) if wh else ""
+    return pd.DataFrame(rows(f"SELECT h.id,h.person_name,r.department,h.holiday_date,h.hours,h.source,h.notes FROM holidays h LEFT JOIN mvp_resources r ON lower(r.person_name)=lower(h.person_name) {where} ORDER BY h.holiday_date,h.person_name", tuple(params)))
+
+
+def save_holidays(records: Iterable[dict]) -> None:
+    ensure_mvp_schema()
+    with connect() as conn:
+        for r in records:
+            name=str(r.get("person_name") or "").strip(); hdate=normalise_date_for_db(r.get("holiday_date"))
+            if not name or not hdate: continue
+            person=conn.execute("SELECT id FROM mvp_resources WHERE lower(person_name)=lower(?)", (name,)).fetchone()
+            conn.execute("INSERT OR REPLACE INTO holidays(id,resource_id,person_name,holiday_date,hours,source,notes) VALUES (?,?,?,?,?,?,?)", (r.get("id"), person["id"] if person else None, name, hdate, float(r.get("hours") or 0), r.get("source") or "manual", r.get("notes")))
+    recalculate_holiday_totals()
+
 def save_resources(records: Iterable[dict]) -> None:
     ensure_mvp_schema()
     with connect() as conn:
@@ -506,7 +701,6 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
 
             totals[dept] += max(
                 float(r["weekly_hours"] or 0)
-                - float(r.get("holiday_booked_hours") or 0)
                 - holiday_hours,
                 0,
             )
