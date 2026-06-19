@@ -38,6 +38,33 @@ CREATE TABLE IF NOT EXISTS non_billable_categories (
   removes_availability INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS capacity_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope_type TEXT NOT NULL CHECK(scope_type IN ('global','team','discipline','person')),
+  scope_id INTEGER,
+  diminished_capacity_factor REAL NOT NULL DEFAULT 0.85 CHECK(diminished_capacity_factor >= 0 AND diminished_capacity_factor <= 1),
+  effective_from TEXT,
+  effective_to TEXT,
+  notes TEXT,
+  UNIQUE(scope_type, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS work_item_types (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE CHECK(name IN ('Project','QA','FLOW','Training','Admin','Leave','Unavailable','Other')),
+  consumes_capacity INTEGER NOT NULL DEFAULT 1,
+  removes_availability INTEGER NOT NULL DEFAULT 0,
+  project_backed INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS work_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  work_item_type_id INTEGER NOT NULL REFERENCES work_item_types(id),
+  project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_name TEXT NOT NULL,
@@ -110,11 +137,75 @@ CREATE TABLE IF NOT EXISTS daily_allocations (
   allocation_date TEXT NOT NULL,
   project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
   category_id INTEGER REFERENCES non_billable_categories(id),
+  work_item_id INTEGER REFERENCES work_items(id),
   split_slot INTEGER NOT NULL DEFAULT 1 CHECK(split_slot IN (1,2)),
   allocated_hours REAL NOT NULL,
   notes TEXT,
   source TEXT NOT NULL DEFAULT 'manual',
   UNIQUE(person_id, allocation_date, split_slot)
+);
+
+CREATE TABLE IF NOT EXISTS workbook_import_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL,
+  uploaded_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'staged',
+  summary_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workbook_staging_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES workbook_import_batches(id) ON DELETE CASCADE,
+  row_number INTEGER NOT NULL,
+  project_code TEXT,
+  project_name TEXT,
+  progress_percent REAL,
+  lead TEXT,
+  rs_hours REAL,
+  gis_hours REAL,
+  pls_hours REAL,
+  production_total REAL,
+  start_date TEXT,
+  end_date TEXT,
+  pm_end_date TEXT,
+  archived INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS workbook_staging_roster (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES workbook_import_batches(id) ON DELETE CASCADE,
+  row_number INTEGER NOT NULL,
+  person_name TEXT,
+  team_code TEXT,
+  discipline_code TEXT,
+  primary_role TEXT,
+  secondary_role TEXT,
+  work_date TEXT,
+  available_hours REAL
+);
+
+CREATE TABLE IF NOT EXISTS workbook_staging_allocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES workbook_import_batches(id) ON DELETE CASCADE,
+  row_number INTEGER NOT NULL,
+  person_name TEXT,
+  team_code TEXT,
+  discipline_code TEXT,
+  allocation_date TEXT,
+  allocation_label TEXT,
+  available_hours REAL
+);
+
+CREATE TABLE IF NOT EXISTS workbook_validation_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES workbook_import_batches(id) ON DELETE CASCADE,
+  severity TEXT NOT NULL CHECK(severity IN ('Info','Warning','Error')),
+  issue_type TEXT NOT NULL,
+  sheet_name TEXT,
+  row_number INTEGER,
+  field_name TEXT,
+  message TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS actual_hours (
