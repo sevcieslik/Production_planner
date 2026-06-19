@@ -188,3 +188,61 @@ def discipline_metrics(discipline_code: str, start: str, end: str) -> dict:
     over=rows('''SELECT COALESCE(SUM(x.over_hours),0) overallocated FROM (SELECT MAX(SUM(da.allocated_hours)-ac.available_hours,0) over_hours FROM availability_calendar ac JOIN people p ON p.id=ac.person_id JOIN disciplines d ON d.id=p.discipline_id LEFT JOIN daily_allocations da ON da.person_id=p.id AND da.allocation_date=ac.work_date WHERE d.code=? AND ac.work_date BETWEEN ? AND ? GROUP BY ac.id) x''', (discipline_code,start,end))[0]['overallocated'] or 0
     effective_available = (r['available'] or 0) * diminished_capacity_factor()
     return {'available': r['available'] or 0, 'effective_available': effective_available, 'planned': r['planned'] or 0, 'allocated': r['allocated'] or 0, 'unallocated': max(effective_available-(r['allocated'] or 0),0), 'overallocated': over}
+
+
+def normalize_loading_method(method: str | None) -> str:
+    value = (method or 'Even spread').strip().lower().replace('_', '-').replace(' weekly spread', '')
+    mapping = {
+        'even spread': 'Even spread',
+        'front-loaded': 'Front-loaded',
+        'back-loaded': 'Back-loaded',
+        'manual': 'Manual weekly spread',
+        'manual weekly spread': 'Manual weekly spread',
+    }
+    return mapping.get(value, 'Even spread')
+
+
+def project_display_name(code: str | None, client: str | None, name: str | None) -> str:
+    parts = [p for p in [code, client, name] if p]
+    return ' | '.join(parts)
+
+
+def save_discipline_plan(project_id: int, discipline_id: int, planned_hours: float, earliest_start_date: date,
+                         target_end_date: date, loading_method: str, notes: str | None, user: str,
+                         reason: str | None = None) -> int:
+    method = normalize_loading_method(loading_method)
+    with connect() as conn:
+        previous = [dict(r) for r in conn.execute(
+            'SELECT * FROM project_discipline_plans WHERE project_id=? AND discipline_id=?',
+            (project_id, discipline_id),
+        ).fetchall()]
+        cur = conn.execute('''INSERT INTO project_discipline_plans(project_id,discipline_id,planned_hours,earliest_start_date,target_end_date,loading_method,notes,updated_by,updated_at)
+                              VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+                              ON CONFLICT(project_id,discipline_id) DO UPDATE SET planned_hours=excluded.planned_hours,
+                              earliest_start_date=excluded.earliest_start_date,target_end_date=excluded.target_end_date,
+                              loading_method=excluded.loading_method,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=excluded.updated_at''',
+                           (project_id, discipline_id, float(planned_hours), earliest_start_date.isoformat(),
+                            target_end_date.isoformat(), method, notes, user))
+        conn.execute('''INSERT INTO project_discipline_budgets(project_id,discipline_id,planned_hours) VALUES (?,?,?)
+                        ON CONFLICT(project_id,discipline_id) DO UPDATE SET planned_hours=excluded.planned_hours''',
+                     (project_id, discipline_id, float(planned_hours)))
+        conn.execute('''INSERT INTO project_discipline_dates(project_id,discipline_id,start_date,end_date) VALUES (?,?,?,?)
+                        ON CONFLICT(project_id,discipline_id) DO UPDATE SET start_date=excluded.start_date,end_date=excluded.end_date''',
+                     (project_id, discipline_id, earliest_start_date.isoformat(), target_end_date.isoformat()))
+        plan_id = conn.execute('SELECT id FROM project_discipline_plans WHERE project_id=? AND discipline_id=?', (project_id, discipline_id)).fetchone()['id']
+        write_audit(conn, user, 'ProjectDisciplinePlan', plan_id, 'upsert', previous,
+                    {'project_id': project_id, 'discipline_id': discipline_id, 'planned_hours': planned_hours,
+                     'earliest_start_date': earliest_start_date.isoformat(), 'target_end_date': target_end_date.isoformat(),
+                     'loading_method': method, 'notes': notes}, reason)
+        return int(plan_id)
+
+
+def save_plan_and_regenerate_demand(project_id: int, discipline_id: int, planned_hours: float, earliest_start_date: date,
+                                    target_end_date: date, loading_method: str, notes: str | None, user: str,
+                                    reason: str | None = None, manual_hours: list[float] | None = None) -> None:
+    method = normalize_loading_method(loading_method)
+    save_discipline_plan(project_id, discipline_id, planned_hours, earliest_start_date, target_end_date, method, notes, user, reason)
+    weeks = week_starts(earliest_start_date, target_end_date)
+    demand = spread_hours(planned_hours, weeks, method, manual_hours if method == 'Manual weekly spread' else None)
+    profile_id = save_loading_profile(project_id, discipline_id, earliest_start_date, target_end_date, planned_hours, method, False, user, reason)
+    save_weekly_demand(project_id, discipline_id, weeks, demand, user, reason, profile_id)

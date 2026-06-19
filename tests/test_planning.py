@@ -12,6 +12,8 @@ from app.services.planning import (
     fit_hours_to_capacity,
     manual_loading_difference,
     overall_capacity_summary,
+    project_display_name,
+    save_plan_and_regenerate_demand,
     spread_hours,
     week_starts,
 )
@@ -39,6 +41,21 @@ class PlanningWorkflowTests(unittest.TestCase):
     def tearDown(self) -> None:
         db.DB_PATH = self.original_db_path
         self.tmp.cleanup()
+
+
+    def test_project_display_name_includes_code_client_and_name(self):
+        self.assertEqual(project_display_name('NMIP26002', 'CHGE', 'Spring 2026'), 'NMIP26002 | CHGE | Spring 2026')
+        self.assertEqual(project_display_name(None, 'HONI', '500kV'), 'HONI | 500kV')
+
+    def test_save_plan_regenerates_plan_budget_dates_and_weekly_demand(self):
+        save_plan_and_regenerate_demand(self.project_id, self.rs_id, 60, date(2026, 1, 5), date(2026, 1, 18), 'Front-loaded', 'note', 'Tester', 'unit test')
+        plan = db.rows('SELECT planned_hours, loading_method FROM project_discipline_plans WHERE project_id=? AND discipline_id=?', (self.project_id, self.rs_id))[0]
+        self.assertEqual(plan['planned_hours'], 60.0)
+        self.assertEqual(plan['loading_method'], 'Front-loaded')
+        budget = db.rows('SELECT planned_hours FROM project_discipline_budgets WHERE project_id=? AND discipline_id=?', (self.project_id, self.rs_id))[0]
+        self.assertEqual(budget['planned_hours'], 60.0)
+        demand = db.rows('SELECT week_start, demand_hours FROM weekly_demand WHERE project_id=? AND discipline_id=? ORDER BY week_start', (self.project_id, self.rs_id))
+        self.assertEqual([r['demand_hours'] for r in demand], [40.0, 20.0])
 
     def test_even_spread(self):
         weeks = week_starts(date(2026, 1, 5), date(2026, 1, 25))

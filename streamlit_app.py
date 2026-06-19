@@ -7,7 +7,7 @@ from app.importers.csv_xlsx import TABLE_COLUMNS, read_upload, validate, import_
 from app.importers.workbook import profile_workbook, profiles_to_frame, stage_workbook, commit_workbook_batch, generated_teams_breakdown, generated_capacity
 from app.services.alerts import save_alerts
 from app.services.forecasting import project_forecasts, save_forecasts
-from app.services.planning import week_starts, spread_hours, save_weekly_demand, gap_analysis, discipline_metrics, build_loading_preview, fit_hours_to_capacity, manual_loading_difference, save_loading_profile, overall_capacity_summary
+from app.services.planning import week_starts, spread_hours, save_weekly_demand, gap_analysis, discipline_metrics, build_loading_preview, fit_hours_to_capacity, manual_loading_difference, save_loading_profile, overall_capacity_summary, project_display_name, save_plan_and_regenerate_demand, normalize_loading_method
 
 st.set_page_config(page_title='Production Capacity Planner', layout='wide')
 initialize_database()
@@ -50,52 +50,106 @@ if page == 'Manager dashboard':
 
 elif page == 'Project loading wizard':
     st.title('Project loading wizard')
-    st.caption('Preferred workflow: preview capacity-aware weekly loading before saving.')
-    if not can_edit: st.warning('PM users are view/export only.')
-    projects=q('SELECT id,project_name,client,start_date,end_date,deadline,status FROM projects ORDER BY project_name')
+    st.caption('Spreadsheet-style planning: edit many discipline plans, preview capacity impact, then save.')
+    if not can_edit:
+        st.warning('PM users are view/export only.')
+
+    projects = q("""SELECT p.id, p.source_reference_id project_code, p.client, p.project_name, p.start_date, p.end_date, p.deadline,
+                    p.status, COALESCE(MAX(op.percent_complete),0) progress_pct
+                    FROM projects p LEFT JOIN osr_progress op ON op.project_id=p.id
+                    WHERE p.status!='Archived' GROUP BY p.id ORDER BY p.source_reference_id, p.client, p.project_name""")
+    disciplines = q('SELECT id,code FROM disciplines WHERE code IN ("RS","GIS","PLS") ORDER BY code')
+    plans = q("""SELECT project_id,d.code discipline,planned_hours,earliest_start_date,target_end_date,loading_method,notes
+                 FROM project_discipline_plans pdp JOIN disciplines d ON d.id=pdp.discipline_id""")
+    if projects.empty:
+        st.info('Add or import projects before creating loading plans.')
+    else:
+        project_labels = {int(r.id): project_display_name(r.project_code, r.client, r.project_name) for r in projects.itertuples()}
+        plan_lookup = {(int(r.project_id), r.discipline): r for r in plans.itertuples()} if not plans.empty else {}
+        table_rows = []
+        for r in projects.itertuples():
+            row = {'project_id': int(r.id), 'Project': project_labels[int(r.id)], 'Project code': r.project_code or '', 'Project name': r.project_name,
+                   'Client': r.client, 'Progress %': float(r.progress_pct or 0), 'Bid total': 0.0,
+                   'Production start date': pd.to_datetime(r.start_date).date(), 'Production estimated completion date': pd.to_datetime(r.end_date).date(),
+                   'Notes': ''}
+            total = 0.0
+            for disc in ['RS', 'GIS', 'PLS']:
+                plan = plan_lookup.get((int(r.id), disc))
+                hrs = float(getattr(plan, 'planned_hours', 0) or 0) if plan else 0.0
+                total += hrs
+                row[f'{disc} total'] = hrs
+                row[f'{disc} earliest start date'] = pd.to_datetime(getattr(plan, 'earliest_start_date', None) or r.start_date).date()
+                row[f'{disc} target/end date'] = pd.to_datetime(getattr(plan, 'target_end_date', None) or r.end_date).date()
+                row[f'{disc} loading method'] = normalize_loading_method(getattr(plan, 'loading_method', 'Even spread') if plan else 'Even spread')
+            row['Production total'] = total
+            table_rows.append(row)
+        edited = st.data_editor(
+            pd.DataFrame(table_rows), key='planning_table_editor', hide_index=True,
+            disabled=['project_id','Project','Project code','Project name','Client','Progress %','Production total'],
+            column_config={
+                'project_id': None,
+                **{f'{d} loading method': st.column_config.SelectboxColumn(options=['Even spread','Front-loaded','Back-loaded','Manual weekly spread']) for d in ['RS','GIS','PLS']},
+                **{f'{d} earliest start date': st.column_config.DateColumn() for d in ['RS','GIS','PLS']},
+                **{f'{d} target/end date': st.column_config.DateColumn() for d in ['RS','GIS','PLS']},
+            }, use_container_width=True)
+        if st.button('Preview loading impact', disabled=not can_edit, key='planning_table_preview_btn'):
+            st.session_state['planning_table_preview'] = edited.to_dict('records')
+        preview_rows = st.session_state.get('planning_table_preview', [])
+        if preview_rows:
+            preview = []; disc_ids = {r.code: int(r.id) for r in disciplines.itertuples()}
+            for row in preview_rows:
+                for disc in ['RS','GIS','PLS']:
+                    hrs = float(row.get(f'{disc} total') or 0); ds = pd.to_datetime(row.get(f'{disc} earliest start date')).date(); de = pd.to_datetime(row.get(f'{disc} target/end date')).date()
+                    if hrs <= 0 or de < ds: continue
+                    weeks = week_starts(ds, de); proposed = spread_hours(hrs, weeks, row.get(f'{disc} loading method'))
+                    for item in build_loading_preview(int(row['project_id']), disc_ids[disc], weeks, proposed):
+                        preview.append({'Project': row['Project'], 'Discipline': disc, **item})
+            st.subheader('Capacity-aware preview')
+            preview_df = pd.DataFrame(preview)
+            colors={'green':'background-color:#d8f3dc','amber':'background-color:#fff3bf','red':'background-color:#ffc9c9','grey':'background-color:#e9ecef'}
+            if not preview_df.empty:
+                st.dataframe(preview_df.style.apply(lambda r: [colors.get(r.get('status'),'') for _ in r], axis=1), use_container_width=True)
+            else:
+                st.info('No positive planned hours with valid date ranges to preview.')
+            if any(any(r.get(f'{d} loading method') == 'Manual weekly spread' for d in ['RS','GIS','PLS']) for r in preview_rows):
+                st.info('Manual loading can be reviewed with the single-project grid below; table saves use the entered total and date range.')
+            if st.button('Save changes', disabled=not can_edit, key='planning_table_save_btn'):
+                saved = 0
+                for row in preview_rows:
+                    for disc in ['RS','GIS','PLS']:
+                        hrs = float(row.get(f'{disc} total') or 0); ds = pd.to_datetime(row.get(f'{disc} earliest start date')).date(); de = pd.to_datetime(row.get(f'{disc} target/end date')).date()
+                        if hrs > 0 and de >= ds:
+                            save_plan_and_regenerate_demand(int(row['project_id']), disc_ids[disc], hrs, ds, de, row.get(f'{disc} loading method'), row.get('Notes'), user, 'Planning table save')
+                            saved += 1
+                st.cache_data.clear(); st.success(f'Saved {saved} discipline plans and regenerated weekly demand.')
+
+    st.divider(); st.subheader('Legacy single-project quick loader')
+    st.caption('Kept for focused edits; uses separate session keys so preview does not collide with widget state.')
+    projects=q('SELECT id,source_reference_id project_code,project_name,client,start_date,end_date,deadline,status FROM projects ORDER BY source_reference_id,client,project_name')
     disciplines=q('SELECT id,code FROM disciplines ORDER BY code')
-    create_new = st.checkbox('Create a new project')
-    with st.form('loading_wizard'):
-        if create_new:
-            new_name=st.text_input('Project name'); new_client=st.text_input('Client', value='TBC'); project_name=None
-        else:
-            project_name=st.selectbox('Project', projects.project_name.tolist()) if not projects.empty else None; new_name=''; new_client=''
-        disc_code=st.selectbox('Discipline', disciplines.code.tolist())
+    project_options = [project_display_name(r.project_code, r.client, r.project_name) for r in projects.itertuples()] if not projects.empty else []
+    with st.form('loading_wizard_form'):
+        selected_label=st.selectbox('Project', project_options, key='lw_project_select') if project_options else None
+        disc_code=st.selectbox('Discipline', disciplines.code.tolist(), key='lw_disc_select')
         ds=st.date_input('Discipline loading start', start, key='lw_start'); de=st.date_input('Discipline loading end', end, key='lw_end')
-        total=st.number_input('Total planned hours', min_value=0.0, step=7.5, value=37.5)
-        mode=st.radio('Loading method', ['Even spread','Front-loaded','Back-loaded','Manual weekly spread'], horizontal=True)
-        fit=st.checkbox('Fit to available capacity')
-        weeks=week_starts(ds,de); manual=[]
+        total=st.number_input('Total planned hours', min_value=0.0, step=7.5, value=37.5, key='lw_total')
+        mode=st.radio('Loading method', ['Even spread','Front-loaded','Back-loaded','Manual weekly spread'], horizontal=True, key='lw_mode')
+        manual=[]
         if mode == 'Manual weekly spread':
-            for w in weeks:
-                manual.append(st.number_input(f'Week {w.isoformat()}', min_value=0.0, step=1.0, key=f'lw_manual_{w}'))
-            st.info(f'Manual total variance: {manual_loading_difference(total, manual):+.1f}h.')
+            for w in week_starts(ds,de): manual.append(st.number_input(f'Week {w.isoformat()}', min_value=0.0, step=1.0, key=f'lw_manual_{w}'))
         reason=st.text_input('Reason/comment', key='lw_reason')
         preview_clicked=st.form_submit_button('Preview loading', disabled=not can_edit)
-    if preview_clicked:
-        st.session_state['loading_wizard']={'create':create_new,'new_name':new_name,'new_client':new_client,'project_name':project_name,'disc_code':disc_code,'ds':ds,'de':de,'total':total,'mode':mode,'fit':fit,'manual':manual,'reason':reason}
-    cfg=st.session_state.get('loading_wizard')
+    if preview_clicked and selected_label:
+        st.session_state['loading_wizard_preview']={'project_label':selected_label,'disc_code':disc_code,'ds':ds,'de':de,'total':total,'mode':mode,'manual':manual,'reason':reason}
+    cfg=st.session_state.get('loading_wizard_preview')
     if cfg:
-        pid = None if cfg['create'] else int(projects.loc[projects.project_name==cfg['project_name'],'id'].iloc[0])
-        did = int(disciplines.loc[disciplines.code==cfg['disc_code'],'id'].iloc[0])
-        weeks=week_starts(cfg['ds'], cfg['de'])
-        proposed = spread_hours(cfg['total'], weeks, cfg['mode'], cfg['manual'] if cfg['mode']=='Manual weekly spread' else None)
-        remaining=0.0; completion=None
-        if cfg['fit']:
-            proposed, remaining, completion = fit_hours_to_capacity(cfg['total'], weeks, did, pid)
-        preview_df=pd.DataFrame(build_loading_preview(pid, did, weeks, proposed))
-        def color_status(row):
-            colors={'green':'background-color:#d8f3dc','amber':'background-color:#fff3bf','red':'background-color:#ffc9c9','grey':'background-color:#e9ecef'}
-            return [colors.get(row.get('status'), '') for _ in row]
-        st.subheader('Capacity-aware preview')
-        st.dataframe(preview_df.style.apply(color_status, axis=1), use_container_width=True)
-        if cfg['fit'] and remaining > 0:
-            st.error(f"Capacity fit cannot deliver within selected dates. Remaining unallocated hours: {remaining:.1f}h. First possible completion week: {completion.isoformat() if completion else 'not found'}.")
-        if st.button('Confirm and save weekly demand', disabled=not can_edit or (cfg['mode']=='Manual weekly spread' and abs(manual_loading_difference(cfg['total'], proposed))>=0.01)):
-            if cfg['create']:
-                pid=execute("INSERT INTO projects(project_name,client,start_date,end_date,deadline,status,notes,imported_at) VALUES (?,?,?,?,?,?,?,datetime('now'))", (cfg['new_name'],cfg['new_client'],str(cfg['ds']),str(cfg['de']),str(cfg['de']),'Active','Created in project loading wizard'), user=user, audit={'object_type':'Project','action':'insert','new':{'project_name':cfg['new_name']},'reason':cfg['reason']})
-            profile_id=save_loading_profile(int(pid), did, cfg['ds'], cfg['de'], cfg['total'], cfg['mode'], cfg['fit'], user, cfg['reason'])
-            save_weekly_demand(int(pid), did, weeks, proposed, user, cfg['reason'], profile_id)
+        idx = project_options.index(cfg['project_label']); pid = int(projects.iloc[idx].id); did = int(disciplines.loc[disciplines.code==cfg['disc_code'],'id'].iloc[0])
+        weeks=week_starts(cfg['ds'], cfg['de']); proposed=spread_hours(cfg['total'], weeks, cfg['mode'], cfg['manual'] if cfg['mode']=='Manual weekly spread' else None)
+        st.dataframe(pd.DataFrame(build_loading_preview(pid, did, weeks, proposed)), use_container_width=True)
+        diff = manual_loading_difference(cfg['total'], proposed)
+        if cfg['mode']=='Manual weekly spread': st.info(f'Manual variance: {diff:+.1f}h.')
+        if st.button('Confirm and save weekly demand', disabled=not can_edit or (cfg['mode']=='Manual weekly spread' and abs(diff)>=0.01), key='lw_save_preview'):
+            save_plan_and_regenerate_demand(pid, did, cfg['total'], cfg['ds'], cfg['de'], cfg['mode'], cfg['reason'], user, cfg['reason'], cfg['manual'] if cfg['mode']=='Manual weekly spread' else None)
             st.cache_data.clear(); st.success('Project loading profile and weekly demand saved.')
 
 elif page == 'Planning mode':
@@ -184,30 +238,62 @@ elif page == 'Dashboard':
 elif page == 'Overall capacity view':
     st.title('Overall capacity view')
     weeks=week_starts(start,end); week_cols=[w.isoformat() for w in weeks]
-    base=q("""SELECT p.id,p.source_reference_id project_code,p.project_name,COALESCE(MAX(op.percent_complete),0) percent_complete,
+    base=q("""SELECT p.id,p.source_reference_id project_code,p.client,p.project_name,
+              CASE WHEN p.source_reference_id IS NOT NULL AND p.source_reference_id<>'' THEN p.source_reference_id || ' | ' || p.client || ' | ' || p.project_name ELSE p.client || ' | ' || p.project_name END project_display,
+              COALESCE(MAX(op.percent_complete),0) percent_complete,
               COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations da WHERE da.project_id=p.id AND da.allocation_date BETWEEN ? AND ?),0) hrs_assigned,
               COALESCE((SELECT SUM(planned_hours) FROM project_discipline_budgets b WHERE b.project_id=p.id),0) planned_hrs
-              FROM projects p LEFT JOIN osr_progress op ON op.project_id=p.id GROUP BY p.id ORDER BY p.project_name""",(str(start),str(end)))
+              FROM projects p LEFT JOIN osr_progress op ON op.project_id=p.id
+              WHERE p.status!='Archived' GROUP BY p.id ORDER BY project_display""",(str(start),str(end)))
     demand=q('SELECT p.id project_id, wd.week_start, SUM(wd.demand_hours) hours FROM weekly_demand wd JOIN projects p ON p.id=wd.project_id WHERE wd.week_start BETWEEN ? AND ? GROUP BY p.id, wd.week_start',(week_cols[0] if week_cols else str(start), week_cols[-1] if week_cols else str(end)))
+    non_project=q("""SELECT COALESCE(wi.name,cat.name,'Non-project') item_name, date(da.allocation_date, '-' || ((strftime('%w', da.allocation_date)+6) % 7) || ' days') week_start, SUM(da.allocated_hours) hours
+                    FROM daily_allocations da LEFT JOIN work_items wi ON wi.id=da.work_item_id LEFT JOIN non_billable_categories cat ON cat.id=da.category_id
+                    WHERE da.project_id IS NULL AND da.allocation_date BETWEEN ? AND ? GROUP BY item_name, week_start""", (str(start), str(end)))
     if not base.empty:
         pivot=demand.pivot_table(index='project_id', columns='week_start', values='hours', aggfunc='sum').fillna(0) if not demand.empty else pd.DataFrame(index=base.id)
         table=base.set_index('id').join(pivot, how='left').fillna(0).reset_index(drop=True)
         table['HRS remaining']=table['planned_hrs']-table['hrs_assigned']; table['% effort spent']=(table['hrs_assigned']/table['planned_hrs'].replace(0, pd.NA)*100).fillna(0).round(1)
-        table=table.rename(columns={'project_code':'Project code','project_name':'Project name','percent_complete':'% complete','hrs_assigned':'HRS assigned','planned_hrs':'Planned HRS'})
+        table=table.rename(columns={'project_code':'Project code','project_display':'Project display name','percent_complete':'% complete','hrs_assigned':'HRS assigned','planned_hrs':'Planned HRS'})
+        table=table[['Project code','Project display name','% complete','HRS assigned','Planned HRS','HRS remaining','% effort spent', *[c for c in week_cols if c in table.columns]]]
+        st.subheader('Active projects')
         st.dataframe(table, use_container_width=True)
+    if not non_project.empty:
+        np_pivot=non_project.pivot_table(index='item_name', columns='week_start', values='hours', aggfunc='sum').fillna(0).reset_index()
+        for item in ['Administrative','FLOW','QA Team','Training','UAT']:
+            if item not in np_pivot['item_name'].tolist():
+                np_pivot.loc[len(np_pivot)] = {'item_name': item, **{w: 0 for w in week_cols}}
+        st.subheader('Non-project work items')
+        st.dataframe(np_pivot.rename(columns={'item_name':'Work item'}), use_container_width=True)
     summary=overall_capacity_summary(str(start), str(end))
     st.subheader('Summary rows')
-    st.dataframe(pd.DataFrame([{'row':'CAPACITY', **{k:v['capacity'] for k,v in summary.items()}},{'row':'ALLOCATED', **{k:v['allocated'] for k,v in summary.items()}},{'row':'RS Shortage','RS':summary.get('RS',{}).get('shortage',0)},{'row':'GIS Shortage','GIS':summary.get('GIS',{}).get('shortage',0)},{'row':'PLS Shortage','PLS':summary.get('PLS',{}).get('shortage',0)}]), use_container_width=True)
+    summary_df = pd.DataFrame([{'row':'CAPACITY', **{k:v['capacity'] for k,v in summary.items()}},{'row':'ALLOCATED', **{k:v['allocated'] for k,v in summary.items()}},{'row':'RS Shortage','RS':summary.get('RS',{}).get('shortage',0)},{'row':'GIS Shortage','GIS':summary.get('GIS',{}).get('shortage',0)},{'row':'PLS Shortage','PLS':summary.get('PLS',{}).get('shortage',0)}])
+    st.dataframe(summary_df, use_container_width=True)
 
 elif page == 'Timeline view':
     st.title('Project timeline / Gantt view')
-    df=q("""SELECT p.project_name,d.code discipline,COALESCE(pdd.start_date,p.start_date) start_date,COALESCE(pdd.end_date,p.end_date) end_date,p.status
-            FROM projects p CROSS JOIN disciplines d LEFT JOIN project_discipline_dates pdd ON pdd.project_id=p.id AND pdd.discipline_id=d.id
-            WHERE p.status!='Archived' ORDER BY p.project_name,d.code""")
-    if not df.empty:
+    df=q("""SELECT p.source_reference_id project_code,p.client,p.project_name,
+            CASE WHEN p.source_reference_id IS NOT NULL AND p.source_reference_id<>'' THEN p.source_reference_id || ' | ' || p.client || ' | ' || p.project_name ELSE p.client || ' | ' || p.project_name END project_display,
+            d.code discipline,COALESCE(pdp.earliest_start_date,pdd.start_date,p.start_date) start_date,
+            COALESCE(pdp.target_end_date,pdd.end_date,p.end_date) end_date,p.status
+            FROM projects p CROSS JOIN disciplines d
+            LEFT JOIN project_discipline_dates pdd ON pdd.project_id=p.id AND pdd.discipline_id=d.id
+            LEFT JOIN project_discipline_plans pdp ON pdp.project_id=p.id AND pdp.discipline_id=d.id
+            WHERE p.status!='Archived' AND d.code IN ('RS','GIS','PLS') ORDER BY project_display,d.code""")
+    if df.empty:
+        st.info('No active projects to show on the timeline.')
+    else:
+        df['start_date'] = pd.to_datetime(df['start_date']); df['end_date'] = pd.to_datetime(df['end_date'])
+        df = df[df['end_date'] >= df['start_date']]
         st.caption(f"Today marker: {date.today().isoformat()}")
-        st.bar_chart(df.assign(duration=(pd.to_datetime(df.end_date)-pd.to_datetime(df.start_date)).dt.days.clip(lower=1)).pivot_table(index='project_name', columns='discipline', values='duration', aggfunc='sum').fillna(0))
-        st.dataframe(df, use_container_width=True)
+        try:
+            import plotly.express as px
+            fig = px.timeline(df, x_start='start_date', x_end='end_date', y='project_display', color='discipline', hover_data=['project_code','client','project_name','status'], category_orders={'discipline':['RS','GIS','PLS']})
+            fig.update_yaxes(autorange='reversed', title='Project')
+            fig.add_vline(x=pd.Timestamp(date.today()), line_dash='dash', line_color='black')
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            st.info('Plotly is unavailable, showing a table-based timeline instead.')
+        st.dataframe(df.rename(columns={'project_display':'Project','discipline':'Discipline','start_date':'Start','end_date':'End'}), use_container_width=True)
 
 elif page == 'Team capacity':
     df=q('''SELECT d.code discipline, substr(ac.work_date,1,10) date, COALESCE(SUM(ac.available_hours),0) available_hours,
@@ -220,9 +306,17 @@ elif page == 'Team capacity':
 
 elif page == 'Project view':
     f=pd.DataFrame(project_forecasts(str(end)))
-    budgets=q('''SELECT p.project_name,d.code, b.planned_hours FROM project_discipline_budgets b JOIN projects p ON p.id=b.project_id JOIN disciplines d ON d.id=b.discipline_id''')
+    budgets=q('''SELECT CASE WHEN p.source_reference_id IS NOT NULL AND p.source_reference_id<>'' THEN p.source_reference_id || ' | ' || p.client || ' | ' || p.project_name ELSE p.client || ' | ' || p.project_name END project_name,
+                 d.code, COALESCE(pdp.planned_hours, b.planned_hours, 0) planned_hours
+                 FROM project_discipline_budgets b JOIN projects p ON p.id=b.project_id JOIN disciplines d ON d.id=b.discipline_id
+                 LEFT JOIN project_discipline_plans pdp ON pdp.project_id=b.project_id AND pdp.discipline_id=b.discipline_id''')
     st.subheader('Forecasts and deadline risk'); st.dataframe(f, use_container_width=True)
-    st.subheader('Planned hours by discipline'); st.dataframe(budgets.pivot_table(index='project_name', columns='code', values='planned_hours', aggfunc='sum').fillna(0), use_container_width=True)
+    st.subheader('Planned hours by discipline')
+    required = {'project_name','code','planned_hours'}
+    if budgets.empty or not required.issubset(set(budgets.columns)):
+        st.info('No planned hours have been loaded yet.')
+    else:
+        st.dataframe(budgets.pivot_table(index='project_name', columns='code', values='planned_hours', aggfunc='sum').fillna(0), use_container_width=True)
 
 elif page == 'People allocation':
     df=q('''SELECT pe.name, COALESCE(ac.work_date, '') work_date, COALESCE(ac.available_hours, pe.daily_hours, 0) available_hours, COALESCE(wi.name,pr.project_name,cat.name,'Unallocated') assigned_to, da.split_slot, COALESCE(da.allocated_hours,0) allocated_hours,
