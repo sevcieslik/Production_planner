@@ -56,9 +56,10 @@ def gap_analysis(start: str, end: str, discipline_code: str | None = None) -> di
       WHERE ac.work_date BETWEEN ? AND ? {disc_filter} GROUP BY ac.id ORDER BY ac.work_date,d.code,pe.name''', params)
     unassigned=[]; over=[]
     for r in people:
+        r['effective_capacity_hours'] = round((r['available_hours'] or 0) * diminished_capacity_factor(), 2)
         if r['available_hours'] > 0 and r['allocated_hours'] == 0:
             unassigned.append(r)
-        if r['allocated_hours'] > r['available_hours']:
+        if r['allocated_hours'] > r['effective_capacity_hours']:
             over.append(r)
     return {'demand': demand, 'unassigned_people': unassigned, 'overallocated_people': over}
 
@@ -68,4 +69,10 @@ def discipline_metrics(discipline_code: str, start: str, end: str) -> dict:
       COALESCE((SELECT SUM(da.allocated_hours) FROM daily_allocations da JOIN people p2 ON p2.id=da.person_id JOIN disciplines d2 ON d2.id=p2.discipline_id WHERE d2.code=? AND da.allocation_date BETWEEN ? AND ?),0) allocated
       FROM availability_calendar ac JOIN people p ON p.id=ac.person_id JOIN disciplines d ON d.id=p.discipline_id WHERE d.code=? AND ac.work_date BETWEEN ? AND ?''', (discipline_code,start,end,discipline_code,start,end))[0]
     over=rows('''SELECT COALESCE(SUM(x.over_hours),0) overallocated FROM (SELECT MAX(SUM(da.allocated_hours)-ac.available_hours,0) over_hours FROM availability_calendar ac JOIN people p ON p.id=ac.person_id JOIN disciplines d ON d.id=p.discipline_id LEFT JOIN daily_allocations da ON da.person_id=p.id AND da.allocation_date=ac.work_date WHERE d.code=? AND ac.work_date BETWEEN ? AND ? GROUP BY ac.id) x''', (discipline_code,start,end))[0]['overallocated'] or 0
-    return {'available': r['available'] or 0, 'allocated': r['allocated'] or 0, 'unallocated': max((r['available'] or 0)-(r['allocated'] or 0),0), 'overallocated': over}
+    effective_available = (r['available'] or 0) * diminished_capacity_factor()
+    return {'available': r['available'] or 0, 'effective_available': effective_available, 'allocated': r['allocated'] or 0, 'unallocated': max(effective_available-(r['allocated'] or 0),0), 'overallocated': over}
+
+
+def diminished_capacity_factor() -> float:
+    setting = rows('SELECT diminished_capacity_factor FROM capacity_settings WHERE scope_type="global" ORDER BY id LIMIT 1')
+    return float(setting[0]['diminished_capacity_factor']) if setting else 0.85
