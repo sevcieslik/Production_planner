@@ -131,6 +131,49 @@ CREATE TABLE IF NOT EXISTS weekly_demand (
   UNIQUE(project_id, discipline_id, week_start)
 );
 
+
+CREATE TABLE IF NOT EXISTS project_loading_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  discipline_id INTEGER NOT NULL REFERENCES disciplines(id),
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  total_planned_hours REAL NOT NULL,
+  loading_method TEXT NOT NULL CHECK(loading_method IN ('Even spread','Front-loaded','Back-loaded','Manual weekly spread')),
+  fit_to_capacity INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weekly_project_demand (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  discipline_id INTEGER NOT NULL REFERENCES disciplines(id),
+  week_start TEXT NOT NULL,
+  demand_hours REAL NOT NULL DEFAULT 0,
+  loading_profile_id INTEGER REFERENCES project_loading_profiles(id) ON DELETE SET NULL,
+  source TEXT NOT NULL DEFAULT 'planning_wizard',
+  UNIQUE(project_id, discipline_id, week_start)
+);
+
+CREATE TABLE IF NOT EXISTS project_discipline_dates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  discipline_id INTEGER NOT NULL REFERENCES disciplines(id),
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  UNIQUE(project_id, discipline_id)
+);
+
+CREATE TABLE IF NOT EXISTS planning_scenarios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS daily_allocations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
