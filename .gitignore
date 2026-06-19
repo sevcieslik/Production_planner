@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+data/*.sqlite
+data/*.sqlite-*
+data/exports/*
+!data/exports/.gitkeep
