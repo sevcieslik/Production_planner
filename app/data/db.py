@@ -32,8 +32,65 @@ def connect():
 def initialize_database(seed: bool = True) -> None:
     with connect() as conn:
         conn.executescript(SCHEMA_PATH.read_text())
+        migrate_database(conn)
         if seed and conn.execute('SELECT COUNT(*) FROM disciplines').fetchone()[0] == 0:
             seed_database(conn)
+        seed_capacity_rules(conn)
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(r['name'] == column for r in conn.execute(f'PRAGMA table_info({table})').fetchall())
+
+
+def migrate_database(conn: sqlite3.Connection) -> None:
+    if not _has_column(conn, 'daily_allocations', 'work_item_id'):
+        conn.execute('ALTER TABLE daily_allocations ADD COLUMN work_item_id INTEGER REFERENCES work_items(id)')
+
+
+def seed_capacity_rules(conn: sqlite3.Connection) -> None:
+    conn.execute('''INSERT OR IGNORE INTO capacity_settings(scope_type,scope_id,diminished_capacity_factor,notes)
+                    VALUES ('global',0,0.85,'Default workbook diminished capacity factor')''')
+    types = [
+        ('Project', 1, 0, 1), ('QA', 1, 0, 0), ('FLOW', 1, 0, 0), ('Training', 1, 0, 0),
+        ('Admin', 1, 0, 0), ('Leave', 0, 1, 0), ('Unavailable', 0, 1, 0), ('Other', 1, 0, 0),
+    ]
+    conn.executemany('''INSERT OR IGNORE INTO work_item_types(name,consumes_capacity,removes_availability,project_backed)
+                        VALUES (?,?,?,?)''', types)
+    for name in ['QA', 'FLOW', 'Training', 'Admin', 'Leave', 'Unavailable', 'Other']:
+        tid = conn.execute('SELECT id FROM work_item_types WHERE name=?', (name,)).fetchone()['id']
+        conn.execute('INSERT OR IGNORE INTO work_items(name,work_item_type_id,active) VALUES (?,?,1)', (name, tid))
+    project_type = conn.execute('SELECT id FROM work_item_types WHERE name="Project"').fetchone()['id']
+    for project in conn.execute('SELECT id, project_name FROM projects').fetchall():
+        conn.execute('''INSERT OR IGNORE INTO work_items(name,work_item_type_id,project_id,active)
+                        VALUES (?,?,?,1)''', (project['project_name'], project_type, project['id']))
+
+
+def clear_demo_data() -> None:
+    seed_people = ['Avery RS', 'Blake RS', 'Casey GIS', 'Devon GIS', 'Elliot PLS', 'Finley PLS']
+    with connect() as conn:
+        seed_project_ids = [r['id'] for r in conn.execute("SELECT id FROM projects WHERE source_reference_id LIKE 'SEED-%'").fetchall()]
+        seed_people_ids = [r['id'] for r in conn.execute(
+            f"SELECT id FROM people WHERE name IN ({','.join('?' for _ in seed_people)})", seed_people
+        ).fetchall()]
+        for pid in seed_project_ids:
+            conn.execute('DELETE FROM daily_allocations WHERE project_id=?', (pid,))
+            conn.execute('DELETE FROM actual_hours WHERE project_id=?', (pid,))
+            conn.execute('DELETE FROM osr_progress WHERE project_id=?', (pid,))
+            conn.execute('DELETE FROM forecasts WHERE project_id=?', (pid,))
+            conn.execute('DELETE FROM work_items WHERE project_id=?', (pid,))
+            conn.execute('DELETE FROM projects WHERE id=?', (pid,))
+        for person_id in seed_people_ids:
+            conn.execute('DELETE FROM daily_allocations WHERE person_id=?', (person_id,))
+            conn.execute('DELETE FROM availability_calendar WHERE person_id=?', (person_id,))
+            conn.execute('DELETE FROM leave_records WHERE person_id=?', (person_id,))
+            conn.execute('DELETE FROM people WHERE id=?', (person_id,))
+        write_audit(conn, 'System', 'Database', None, 'clear_demo_data', None, {'projects': len(seed_project_ids), 'people': len(seed_people_ids)}, 'Admin control')
+
+
+def reset_database(reload_seed: bool = True) -> None:
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+    initialize_database(seed=reload_seed)
 
 
 def rows(query: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:

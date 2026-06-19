@@ -2,9 +2,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
-from app.data.db import initialize_database, rows, execute
+from app.data.db import initialize_database, rows, execute, clear_demo_data, reset_database
 from app.importers.csv_xlsx import TABLE_COLUMNS, read_upload, validate, import_dataframe
-from app.importers.workbook import profile_workbook, profiles_to_frame
+from app.importers.workbook import profile_workbook, profiles_to_frame, stage_workbook, commit_workbook_batch, generated_teams_breakdown, generated_capacity
 from app.services.alerts import save_alerts
 from app.services.forecasting import project_forecasts, save_forecasts
 from app.services.planning import week_starts, spread_hours, save_weekly_demand, gap_analysis, discipline_metrics
@@ -27,7 +27,7 @@ def user_header():
     return selected, role
 
 user, role = user_header(); can_edit = role in ('CDO','Manager')
-page = st.sidebar.radio('View', ['Manager dashboard','Planning mode','Allocation mode','Gap analysis','Dashboard','Team capacity','Project view','People allocation','Allocation editor','Import / export','Audit log','Architecture & roadmap'])
+page = st.sidebar.radio('View', ['Manager dashboard','Planning mode','Allocation mode','Gap analysis','Dashboard','Team capacity','Project view','People allocation','Allocation editor','Capacity settings','Import / export','Admin','Audit log','Architecture & roadmap'])
 start = st.sidebar.date_input('Start date', week_start(date.today()))
 end = st.sidebar.date_input('End date', start + timedelta(days=6))
 
@@ -98,7 +98,8 @@ elif page == 'Allocation mode':
                 existing=rows('SELECT * FROM daily_allocations WHERE person_id=? AND allocation_date=? AND split_slot=1',(pid,str(cur)))
                 if existing and not overwrite: st.error(f'Skipped {cur}: existing allocation.'); cur+=timedelta(days=1); continue
                 if overwrite: execute('DELETE FROM daily_allocations WHERE person_id=? AND allocation_date=? AND split_slot=1',(pid,str(cur)),user=user,audit={'object_type':'DailyAllocation','action':'delete','previous':existing,'reason':reason})
-                execute('INSERT OR REPLACE INTO daily_allocations(person_id,allocation_date,project_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?)',(pid,str(cur),pr,1,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'assign_to_demand','new':{'person':person,'project':project,'date':str(cur),'hours':hrs},'reason':reason}); saved+=1
+                wi=rows('SELECT id FROM work_items WHERE project_id=?',(pr,)); wid=wi[0]['id'] if wi else None
+                execute('INSERT OR REPLACE INTO daily_allocations(person_id,allocation_date,project_id,work_item_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?,?)',(pid,str(cur),pr,wid,1,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'assign_to_demand','new':{'person':person,'project':project,'date':str(cur),'hours':hrs},'reason':reason}); saved+=1
             cur+=timedelta(days=1)
         st.success(f'Assigned {saved} working days.')
 
@@ -136,9 +137,9 @@ elif page == 'Project view':
     st.subheader('Planned hours by discipline'); st.dataframe(budgets.pivot_table(index='project_name', columns='code', values='planned_hours', aggfunc='sum').fillna(0), use_container_width=True)
 
 elif page == 'People allocation':
-    df=q('''SELECT pe.name, ac.work_date, ac.available_hours, COALESCE(pr.project_name,cat.name,'Unallocated') assigned_to, da.split_slot, COALESCE(da.allocated_hours,0) allocated_hours,
-    CASE WHEN COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations x WHERE x.person_id=pe.id AND x.allocation_date=ac.work_date),0)>ac.available_hours THEN 'Overallocated' WHEN COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations x WHERE x.person_id=pe.id AND x.allocation_date=ac.work_date),0)=0 THEN 'Underallocated' ELSE 'OK' END flag
-    FROM people pe JOIN availability_calendar ac ON ac.person_id=pe.id LEFT JOIN daily_allocations da ON da.person_id=pe.id AND da.allocation_date=ac.work_date LEFT JOIN projects pr ON pr.id=da.project_id LEFT JOIN non_billable_categories cat ON cat.id=da.category_id WHERE ac.work_date BETWEEN ? AND ? ORDER BY pe.name, ac.work_date, da.split_slot''',(str(start),str(end)))
+    df=q('''SELECT pe.name, COALESCE(ac.work_date, '') work_date, COALESCE(ac.available_hours, pe.daily_hours, 0) available_hours, COALESCE(wi.name,pr.project_name,cat.name,'Unallocated') assigned_to, da.split_slot, COALESCE(da.allocated_hours,0) allocated_hours,
+    CASE WHEN ac.work_date IS NULL THEN 'No availability record' WHEN COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations x WHERE x.person_id=pe.id AND x.allocation_date=ac.work_date),0)>COALESCE(ac.available_hours,0) THEN 'Overallocated' WHEN COALESCE((SELECT SUM(allocated_hours) FROM daily_allocations x WHERE x.person_id=pe.id AND x.allocation_date=ac.work_date),0)=0 THEN 'Underallocated' ELSE 'OK' END flag
+    FROM people pe LEFT JOIN availability_calendar ac ON ac.person_id=pe.id AND ac.work_date BETWEEN ? AND ? LEFT JOIN daily_allocations da ON da.person_id=pe.id AND da.allocation_date=ac.work_date LEFT JOIN projects pr ON pr.id=da.project_id LEFT JOIN work_items wi ON wi.id=da.work_item_id LEFT JOIN non_billable_categories cat ON cat.id=da.category_id WHERE pe.active=1 ORDER BY pe.name, ac.work_date, da.split_slot''',(str(start),str(end)))
     st.dataframe(df, use_container_width=True)
 
 elif page == 'Allocation editor':
@@ -157,28 +158,111 @@ elif page == 'Allocation editor':
                 if existing and not overwrite: st.error(f'Skipped {cur}: existing allocation. Tick confirmation to overwrite.'); cur+=timedelta(days=1); continue
                 if overwrite: execute('DELETE FROM daily_allocations WHERE person_id=? AND allocation_date=?',(pid,str(cur)),user=user,audit={'object_type':'DailyAllocation','action':'delete','previous':existing,'reason':reason})
                 hrs=daily/2 if split else daily
-                execute('INSERT INTO daily_allocations(person_id,allocation_date,project_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?)',(pid,str(cur),p1,1,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'insert','new':{'person':person,'date':str(cur),'project':primary,'hours':hrs},'reason':reason})
-                if split: execute('INSERT INTO daily_allocations(person_id,allocation_date,project_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?)',(pid,str(cur),p2,2,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'insert','new':{'person':person,'date':str(cur),'project':second,'hours':hrs},'reason':reason})
+                wi1=rows('SELECT id FROM work_items WHERE project_id=?',(p1,)); wid1=wi1[0]['id'] if wi1 else None
+                execute('INSERT INTO daily_allocations(person_id,allocation_date,project_id,work_item_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?,?)',(pid,str(cur),p1,wid1,1,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'insert','new':{'person':person,'date':str(cur),'project':primary,'hours':hrs},'reason':reason})
+                if split:
+                    wi2=rows('SELECT id FROM work_items WHERE project_id=?',(p2,)); wid2=wi2[0]['id'] if wi2 else None
+                    execute('INSERT INTO daily_allocations(person_id,allocation_date,project_id,work_item_id,split_slot,allocated_hours,notes) VALUES (?,?,?,?,?,?,?)',(pid,str(cur),p2,wid2,2,hrs,reason),user=user,audit={'object_type':'DailyAllocation','action':'insert','new':{'person':person,'date':str(cur),'project':second,'hours':hrs},'reason':reason})
                 saved+=1
             cur+=timedelta(days=1)
         st.success(f'Saved allocations for {saved} working days.')
 
+elif page == 'Capacity settings':
+    st.title('Capacity settings')
+    st.caption('Diminished Capacity converts available hours into effective planning hours: Available Hours × Diminished Capacity Factor.')
+    settings = q('''SELECT cs.id, cs.scope_type, cs.scope_id, cs.diminished_capacity_factor, cs.notes,
+                    COALESCE(pe.name,t.name,d.code,'Global default') scope_name
+                    FROM capacity_settings cs
+                    LEFT JOIN people pe ON cs.scope_type='person' AND pe.id=cs.scope_id
+                    LEFT JOIN teams t ON cs.scope_type='team' AND t.id=cs.scope_id
+                    LEFT JOIN disciplines d ON cs.scope_type='discipline' AND d.id=cs.scope_id
+                    ORDER BY CASE cs.scope_type WHEN 'global' THEN 1 WHEN 'discipline' THEN 2 WHEN 'team' THEN 3 ELSE 4 END, scope_name''')
+    st.dataframe(settings, use_container_width=True)
+    if not can_edit:
+        st.warning('PM users are view/export only.')
+    scope_type = st.selectbox('Override scope', ['global','discipline','team','person'])
+    scope_id = 0 if scope_type == 'global' else None
+    if scope_type == 'discipline':
+        d = q('SELECT id,code FROM disciplines ORDER BY code')
+        selected = st.selectbox('Discipline', d.code)
+        scope_id = int(d.loc[d.code == selected, 'id'].iloc[0])
+    elif scope_type == 'team':
+        t = q('SELECT id,name FROM teams ORDER BY name')
+        selected = st.selectbox('Team', t.name)
+        scope_id = int(t.loc[t.name == selected, 'id'].iloc[0])
+    elif scope_type == 'person':
+        p = q('SELECT id,name FROM people WHERE active=1 ORDER BY name')
+        selected = st.selectbox('Person', p.name)
+        scope_id = int(p.loc[p.name == selected, 'id'].iloc[0])
+    factor = st.number_input('Diminished capacity factor', min_value=0.0, max_value=1.0, value=0.85, step=0.01)
+    st.info(f'Example: 8.0 available hours × {factor:.2f} = {8.0 * factor:.2f} effective planning hours.')
+    notes = st.text_input('Notes')
+    if st.button('Save capacity setting', disabled=not can_edit):
+        execute('''INSERT INTO capacity_settings(scope_type,scope_id,diminished_capacity_factor,notes) VALUES (?,?,?,?)
+                   ON CONFLICT(scope_type,scope_id) DO UPDATE SET diminished_capacity_factor=excluded.diminished_capacity_factor,notes=excluded.notes''',
+                (scope_type, scope_id, factor, notes), user=user,
+                audit={'object_type':'CapacitySetting','action':'upsert','new':{'scope_type':scope_type,'scope_id':scope_id,'factor':factor},'reason':notes})
+        st.success('Capacity setting saved.')
+
 elif page == 'Import / export':
-    st.subheader('Imports'); import_type=st.selectbox('Import type', list(TABLE_COLUMNS)); st.caption('Required columns: '+', '.join(TABLE_COLUMNS[import_type])); file=st.file_uploader('CSV/XLSX file', type=['csv','xlsx','xls'])
+    st.subheader('Imports'); import_type=st.selectbox('Import type', list(TABLE_COLUMNS)); st.caption('Expected columns: '+', '.join(TABLE_COLUMNS[import_type])); file=st.file_uploader('CSV/XLSX file', type=['csv','xlsx','xls'])
     if file and can_edit:
         df=read_upload(file); missing=validate(df, import_type); st.dataframe(df.head(20), use_container_width=True)
-        if missing: st.error('Missing columns: '+', '.join(missing))
+        if missing: st.error('Missing required columns: '+', '.join(missing))
         elif st.button('Import validated file'):
-            st.success(f'Imported {import_dataframe(df, import_type, user)} rows.')
+            result=import_dataframe(df, import_type, user)
+            st.cache_data.clear()
+            st.success(f"Imported {result.imported_rows} rows into {result.affected_table}; skipped {result.skipped_rows} rows. Refresh/reload if another browser tab still shows cached data.")
+            if result.validation_errors:
+                st.subheader('Validation errors / skipped rows')
+                st.dataframe(pd.DataFrame(result.validation_errors), use_container_width=True)
     elif file: st.warning('PM users can preview and export only.')
     st.subheader('Workbook structure support')
     wb_file=st.file_uploader('Analyse current capacity workbook (.xlsx)', type=['xlsx'], key='workbook_profile')
     if wb_file:
         profiles=profiles_to_frame(profile_workbook(wb_file))
         st.dataframe(profiles, use_container_width=True)
-        st.info('Use this profile to map workbook tabs into controlled imports: people/roster, project demand, person allocations, OSR actuals/progress, leave and holidays. The requested /sample-data/2PROD Capacity plan 2026.xlsx file was not present in this workspace, so this analyser is included for the same workbook structure when available.')
+        st.info('Projects, Roster Daily and Allocation Daily are staged as sources. Teams Breakdown and Capacity are validation targets only.')
+    st.subheader('Workbook parity import')
+    parity_file=st.file_uploader('Stage capacity workbook for import/reconciliation (.xlsx)', type=['xlsx'], key='workbook_stage')
+    if parity_file and can_edit:
+        if st.button('Stage workbook'):
+            result=stage_workbook(parity_file, parity_file.name, user)
+            st.session_state['workbook_batch_id']=result.batch_id
+            st.success(f"Staged workbook batch {result.batch_id}: {result.summary}")
+            st.subheader('Validation issues')
+            st.dataframe(pd.DataFrame(result.validation_issues), use_container_width=True)
+            st.subheader('Teams Breakdown reconciliation preview')
+            st.dataframe(pd.DataFrame(result.teams_reconciliation), use_container_width=True)
+            st.subheader('Capacity reconciliation preview')
+            st.dataframe(pd.DataFrame(result.capacity_reconciliation), use_container_width=True)
+    elif parity_file:
+        st.warning('PM users can preview and export only.')
+    batch_id = st.number_input('Workbook batch to commit', min_value=0, value=int(st.session_state.get('workbook_batch_id', 0)))
+    if batch_id and st.button('Commit staged workbook', disabled=not can_edit):
+        st.success(f'Committed workbook batch {batch_id}: {commit_workbook_batch(int(batch_id), user)}')
+    st.subheader('Generated workbook outputs')
+    if st.button('Generate Teams Breakdown and Capacity previews'):
+        from app.data.db import connect
+        with connect() as conn:
+            st.dataframe(pd.DataFrame(generated_teams_breakdown(conn)), use_container_width=True)
+            st.dataframe(pd.DataFrame(generated_capacity(conn)), use_container_width=True)
     st.subheader('Exports'); export=q('SELECT * FROM projects')
     st.download_button('Download projects CSV', export.to_csv(index=False), 'projects_export.csv')
+
+elif page == 'Admin':
+    st.title('Admin')
+    if not can_edit:
+        st.warning('PM users are view/export only.'); st.stop()
+    st.warning('These controls change local data. Use them before loading real production data or after taking a backup.')
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button('Clear seed/demo data'):
+            clear_demo_data(); st.cache_data.clear(); st.success('Seed/demo people, projects, allocations, availability and linked records were cleared.')
+    with col2:
+        reload_seed=st.checkbox('Reload seed data after reset', value=False)
+        if st.button('Reset database'):
+            reset_database(reload_seed=reload_seed); st.cache_data.clear(); st.success('Database reset complete.')
 
 elif page == 'Audit log':
     st.dataframe(q('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 500'), use_container_width=True)
