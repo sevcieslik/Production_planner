@@ -146,6 +146,12 @@ def ensure_mvp_schema() -> None:
 
             INSERT OR IGNORE INTO settings(key,value)
             VALUES ('diminished_capacity_factor','0.85');
+
+            INSERT OR IGNORE INTO settings(key,value)
+            VALUES ('data_version','0');
+
+            INSERT OR IGNORE INTO settings(key,value)
+            VALUES ('last_updated_at',datetime('now'));
             """
         )
         try:
@@ -153,6 +159,46 @@ def ensure_mvp_schema() -> None:
         except Exception:
             pass
 
+
+
+def get_setting(key: str, default: str = "") -> str:
+    ensure_mvp_schema()
+    r = rows("SELECT value FROM settings WHERE key=?", (key,))
+    return str(r[0]["value"]) if r else default
+
+
+def get_data_version() -> int:
+    value = get_setting("data_version", "0")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_last_updated_at() -> str:
+    return get_setting("last_updated_at", "")
+
+
+def increment_data_version(conn=None) -> int:
+    """Increment the MVP data version used to invalidate derived UI caches."""
+    if conn is None:
+        with connect() as inner:
+            return increment_data_version(inner)
+
+    row = conn.execute("SELECT value FROM settings WHERE key='data_version'").fetchone()
+    try:
+        current = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        current = 0
+    new_version = current + 1
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES ('data_version',?)",
+        (str(new_version),),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES ('last_updated_at',datetime('now'))"
+    )
+    return new_version
 
 def prepare_date_columns_for_editor(
     df: pd.DataFrame, date_columns: list[str]
@@ -331,6 +377,7 @@ def save_projects(records: Iterable[dict]) -> None:
                     archived,
                 ),
             )
+        increment_data_version(conn)
 
 
 def import_default_projects() -> int:
@@ -508,6 +555,7 @@ def import_approved_holidays(path: str | Path = "sample-data/Employee Holiday - 
                 cur = conn.execute("INSERT OR IGNORE INTO holidays(resource_id,person_name,holiday_date,hours,source,notes) VALUES (?,?,?,?,?,?)", (person["id"], name, d.isoformat(), round(hours_per_day,2), "sample-approved", str(row.get(cmap.get("notes", ""), "")).strip())).rowcount
                 if cur: result.imported_holiday_records_count += 1
     recalculate_holiday_totals()
+    increment_data_version()
     result.unmatched_holiday_names = sorted(set(result.unmatched_holiday_names))
     return result
 
@@ -516,7 +564,10 @@ def recalculate_holiday_totals() -> int:
     ensure_mvp_schema()
     with connect() as conn:
         conn.execute("UPDATE mvp_resources SET holiday_booked_hours=COALESCE((SELECT SUM(hours) FROM holidays h WHERE lower(h.person_name)=lower(mvp_resources.person_name)),0), updated_at=datetime('now')")
-        return conn.execute("SELECT changes() c").fetchone()["c"]
+        changed = conn.execute("SELECT changes() c").fetchone()["c"]
+        if changed:
+            increment_data_version(conn)
+        return changed
 
 
 def get_holidays(department: str | None = None, person_name: str | None = None, start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
@@ -538,6 +589,7 @@ def save_holidays(records: Iterable[dict]) -> None:
             person=conn.execute("SELECT id FROM mvp_resources WHERE lower(person_name)=lower(?)", (name,)).fetchone()
             conn.execute("INSERT OR REPLACE INTO holidays(id,resource_id,person_name,holiday_date,hours,source,notes) VALUES (?,?,?,?,?,?,?)", (r.get("id"), person["id"] if person else None, name, hdate, float(r.get("hours") or 0), r.get("source") or "manual", r.get("notes")))
     recalculate_holiday_totals()
+    increment_data_version()
 
 def save_resources(records: Iterable[dict]) -> None:
     ensure_mvp_schema()
@@ -589,6 +641,7 @@ def save_resources(records: Iterable[dict]) -> None:
                     normalise_date_for_db(r.get("status_end_date")),
                 ),
             )
+        increment_data_version(conn)
 
 
 def get_resources() -> pd.DataFrame:
@@ -764,31 +817,88 @@ def weekly_project_demand() -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def capacity_balance(weeks: list[date]) -> pd.DataFrame:
-    cap = weekly_department_capacity(weeks)
-    dem = weekly_project_demand()
 
-    if dem.empty:
-        demand = pd.DataFrame(
+def summary_rows_from_capacity_balance(bal: pd.DataFrame, week_cols: list[str]) -> pd.DataFrame:
+    required = {
+        "week_start",
+        "department",
+        "available_capacity",
+        "allocated_demand",
+        "over_under_capacity",
+    }
+    if bal.empty or not required.issubset(bal.columns):
+        bal = pd.DataFrame(
             [
                 {
-                    "week_start": w.isoformat(),
+                    "week_start": wc,
                     "department": d,
+                    "available_capacity": 0.0,
                     "allocated_demand": 0.0,
+                    "over_under_capacity": 0.0,
                 }
-                for w in weeks
                 for d in DISCIPLINES
+                for wc in week_cols
             ]
         )
+
+    summary = []
+    for d in DISCIPLINES:
+        for label, col in [
+            ("available capacity", "available_capacity"),
+            ("allocated demand", "allocated_demand"),
+            ("over/under capacity", "over_under_capacity"),
+        ]:
+            row = {"Summary": f"{d} {label}"}
+            for wc in week_cols:
+                row[wc] = float(
+                    bal.loc[(bal.department == d) & (bal.week_start == wc), col].sum()
+                )
+            summary.append(row)
+    return pd.DataFrame(summary)
+
+def capacity_balance(weeks: list[date]) -> pd.DataFrame:
+    grid = pd.DataFrame(
+        [
+            {"week_start": w.isoformat(), "department": d}
+            for w in weeks
+            for d in DISCIPLINES
+        ]
+    )
+    if grid.empty:
+        return pd.DataFrame(
+            columns=[
+                "week_start",
+                "department",
+                "available_capacity",
+                "allocated_demand",
+                "over_under_capacity",
+                "status",
+            ]
+        )
+
+    cap = weekly_department_capacity(weeks)
+    if cap.empty or not {"week_start", "department", "available_capacity"}.issubset(cap.columns):
+        cap = grid.assign(available_capacity=0.0)
+    else:
+        cap = grid.merge(cap, on=["week_start", "department"], how="left").fillna(
+            {"available_capacity": 0.0}
+        )
+
+    dem = weekly_project_demand()
+    if dem.empty or not {"week_start", "department", "demand_hours"}.issubset(dem.columns):
+        demand = grid.assign(allocated_demand=0.0)
     else:
         demand = (
             dem.groupby(["week_start", "department"], as_index=False)["demand_hours"]
             .sum()
             .rename(columns={"demand_hours": "allocated_demand"})
         )
+        demand = grid.merge(demand, on=["week_start", "department"], how="left").fillna(
+            {"allocated_demand": 0.0}
+        )
 
     merged = cap.merge(demand, on=["week_start", "department"], how="left").fillna(
-        {"allocated_demand": 0.0}
+        {"available_capacity": 0.0, "allocated_demand": 0.0}
     )
     merged["over_under_capacity"] = (
         merged["available_capacity"] - merged["allocated_demand"]

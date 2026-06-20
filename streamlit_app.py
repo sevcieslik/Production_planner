@@ -16,12 +16,15 @@ from app.services.mvp import (
     RESOURCE_STATUSES,
     capacity_balance,
     ensure_mvp_schema,
+    get_data_version,
+    get_last_updated_at,
     get_projects,
     get_holidays,
     get_resources,
     import_approved_holidays,
     import_default_projects,
     import_sample_roster,
+    increment_data_version,
     prepare_date_columns_for_editor,
     recalculate_holiday_totals,
     save_holidays,
@@ -29,7 +32,9 @@ from app.services.mvp import (
     save_resources,
     seed_resources_from_people,
     setting_float,
+    summary_rows_from_capacity_balance,
     week_starts,
+    weekly_department_capacity,
     weekly_project_demand,
 )
 
@@ -44,7 +49,24 @@ def monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def rerun() -> None:
+
+
+@st.cache_data(show_spinner=False)
+def cached_weekly_project_demand(start_iso: str, end_iso: str, data_version: int) -> pd.DataFrame:
+    return weekly_project_demand()
+
+
+@st.cache_data(show_spinner=False)
+def cached_weekly_department_capacity(week_values: tuple[str, ...], data_version: int) -> pd.DataFrame:
+    return weekly_department_capacity([date.fromisoformat(w) for w in week_values])
+
+
+@st.cache_data(show_spinner=False)
+def cached_capacity_balance(week_values: tuple[str, ...], data_version: int) -> pd.DataFrame:
+    return capacity_balance([date.fromisoformat(w) for w in week_values])
+
+
+def clear_and_rerun() -> None:
     st.cache_data.clear()
     st.rerun()
 
@@ -68,7 +90,7 @@ with tab_projects:
     if c1.button("Import sample projects"):
         n = import_default_projects()
         st.success(f"Imported {n} projects from sample-data/projects.csv")
-        rerun()
+        clear_and_rerun()
 
     df = get_projects(True)
     if df.empty:
@@ -78,33 +100,36 @@ with tab_projects:
         df[PROJECT_FIELDS], PROJECT_DATE_COLUMNS
     )
 
-    edited = st.data_editor(
-        project_editor_df,
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "loading_type": st.column_config.SelectboxColumn(options=LOADING_TYPES),
-            "status": st.column_config.SelectboxColumn(options=["active", "archived"]),
-            **{
-                c: st.column_config.DateColumn()
-                for c in [
-                    "start_date",
-                    "end_date",
-                    "rs_start_date",
-                    "gis_start_date",
-                    "pls_start_date",
-                ]
+    with st.form("projects_form"):
+        edited = st.data_editor(
+            project_editor_df,
+            num_rows="dynamic",
+            hide_index=True,
+            use_container_width=True,
+            key="projects_editor",
+            column_config={
+                "loading_type": st.column_config.SelectboxColumn(options=LOADING_TYPES),
+                "status": st.column_config.SelectboxColumn(options=["active", "archived"]),
+                **{
+                    c: st.column_config.DateColumn()
+                    for c in [
+                        "start_date",
+                        "end_date",
+                        "rs_start_date",
+                        "gis_start_date",
+                        "pls_start_date",
+                    ]
+                },
             },
-        },
-    )
+        )
+        save_projects_submit = st.form_submit_button("Save project changes", type="primary")
 
     col_save, col_delete = st.columns(2)
 
-    if col_save.button("Save project changes", type="primary"):
+    if save_projects_submit:
         save_projects(edited.to_dict("records"))
         st.success("Projects saved. Allocations updated.")
-        rerun()
+        clear_and_rerun()
 
     delete_code = (
         col_delete.selectbox(
@@ -117,8 +142,9 @@ with tab_projects:
 
     if col_delete.button("Delete selected project", disabled=not (delete_code and confirm)):
         execute("DELETE FROM mvp_projects WHERE project_code=?", (delete_code,))
+        increment_data_version()
         st.warning(f"Deleted {delete_code}.")
-        rerun()
+        clear_and_rerun()
 
 
 with tab_resources:
@@ -138,7 +164,8 @@ with tab_resources:
             "INSERT OR REPLACE INTO settings(key,value) VALUES ('diminished_capacity_factor',?)",
             (str(factor),),
         )
-        rerun()
+        increment_data_version()
+        clear_and_rerun()
 
     c_roster, c_holidays, c_recalc = st.columns(3)
     if c_roster.button("Import sample roster"):
@@ -148,7 +175,7 @@ with tab_resources:
             st.warning("Validation issues: " + "; ".join(result.validation_issues[:10]))
         if result.skipped_rows:
             st.warning(f"Skipped {result.skipped_rows} roster rows.")
-        rerun()
+        clear_and_rerun()
 
     if c_holidays.button("Import approved holidays"):
         result = import_approved_holidays()
@@ -159,12 +186,12 @@ with tab_resources:
             st.warning("Validation issues: " + "; ".join(result.validation_issues[:10]))
         if result.skipped_rows:
             st.warning(f"Skipped {result.skipped_rows} holiday rows.")
-        rerun()
+        clear_and_rerun()
 
     if c_recalc.button("Recalculate holiday totals"):
         updated = recalculate_holiday_totals()
         st.success(f"Recalculated holiday totals for {updated} resources.")
-        rerun()
+        clear_and_rerun()
 
     rdf = get_resources()
     if rdf.empty:
@@ -172,23 +199,26 @@ with tab_resources:
 
     resource_editor_df = prepare_date_columns_for_editor(rdf, RESOURCE_DATE_COLUMNS)
 
-    redited = st.data_editor(
-        resource_editor_df,
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "department": st.column_config.SelectboxColumn(options=DISCIPLINES),
-            "active_status": st.column_config.SelectboxColumn(options=RESOURCE_STATUSES),
-            "status_start_date": st.column_config.DateColumn(),
-            "status_end_date": st.column_config.DateColumn(),
-        },
-    )
+    with st.form("resources_form"):
+        redited = st.data_editor(
+            resource_editor_df,
+            num_rows="dynamic",
+            hide_index=True,
+            use_container_width=True,
+            key="resources_editor",
+            column_config={
+                "department": st.column_config.SelectboxColumn(options=DISCIPLINES),
+                "active_status": st.column_config.SelectboxColumn(options=RESOURCE_STATUSES),
+                "status_start_date": st.column_config.DateColumn(),
+                "status_end_date": st.column_config.DateColumn(),
+            },
+        )
+        save_resources_submit = st.form_submit_button("Save resource changes", type="primary")
 
-    if st.button("Save resource changes", type="primary"):
+    if save_resources_submit:
         save_resources(redited.to_dict("records"))
         st.success("Resources saved. Allocations updated.")
-        rerun()
+        clear_and_rerun()
 
     st.subheader("Department changes")
 
@@ -215,7 +245,8 @@ with tab_resources:
             """,
             (rid, dept, ds.isoformat(), de.isoformat()),
         )
-        rerun()
+        increment_data_version()
+        clear_and_rerun()
 
     st.subheader("Holiday log")
     fc1, fc2, fc3, fc4 = st.columns(4)
@@ -238,83 +269,85 @@ with tab_resources:
     if hc1.button("Save holiday changes"):
         save_holidays(hedited.to_dict("records"))
         st.success("Holiday records saved.")
-        rerun()
+        clear_and_rerun()
     delete_holiday_id = hc2.number_input("Delete holiday record id", min_value=0, step=1)
     if hc2.button("Delete holiday record", disabled=delete_holiday_id <= 0):
         execute("DELETE FROM holidays WHERE id=?", (int(delete_holiday_id),))
         recalculate_holiday_totals()
+        increment_data_version()
         st.warning(f"Deleted holiday record {int(delete_holiday_id)}.")
-        rerun()
+        clear_and_rerun()
 
 
 with tab_allocations:
     st.title("Allocations")
     st.caption("Generated weekly demand and department capacity balance.")
 
-    demand = weekly_project_demand()
-    week_cols = [w.isoformat() for w in weeks]
-    rows_out = []
-    projects = get_projects(False)
+    data_version = get_data_version()
+    week_key = tuple(w.isoformat() for w in weeks)
+    week_cols = list(week_key)
 
-    for p in projects.to_dict("records") if not projects.empty else []:
-        for d in DISCIPLINES:
-            if not demand.empty:
-                sub = demand[
-                    (demand.project_code == p["project_code"])
-                    & (demand.department == d)
-                ]
-            else:
-                sub = pd.DataFrame()
+    with st.expander("Allocation controls", expanded=False):
+        selected_departments = st.multiselect(
+            "Departments", DISCIPLINES, default=DISCIPLINES
+        )
+        active_only = st.checkbox("Show active projects only", value=True)
+        show_project_demand = st.checkbox(
+            "Show weekly project demand table", value=False
+        )
 
-            row = {
-                "Project Code": p["project_code"],
-                "Project Name": p["project_name"],
-                "Department": d,
-                "Required Hours": p[f"{d.lower()}_hours"],
-                "Start Date": p.get(f"{d.lower()}_start_date") or p["start_date"],
-                "End Date": p["end_date"],
-                "Loading Type": p["loading_type"],
-            }
+    with st.spinner("Calculating capacity..."):
+        demand = cached_weekly_project_demand(
+            start.isoformat(), end.isoformat(), data_version
+        )
+        _capacity = cached_weekly_department_capacity(week_key, data_version)
+        bal = cached_capacity_balance(week_key, data_version)
 
-            for wc in week_cols:
-                row[wc] = (
-                    float(sub.loc[sub.week_start == wc, "demand_hours"].sum())
-                    if not sub.empty
-                    else 0.0
-                )
+    projects = get_projects(not active_only)
+    if not projects.empty and selected_departments:
+        rows_out = []
+        for p in projects.to_dict("records"):
+            for d in selected_departments:
+                if not demand.empty and {"project_code", "department", "week_start", "demand_hours"}.issubset(demand.columns):
+                    sub = demand[
+                        (demand.project_code == p["project_code"])
+                        & (demand.department == d)
+                    ]
+                else:
+                    sub = pd.DataFrame()
 
-            if p["loading_type"] == "manual":
-                row["Manual Required"] = "Yes"
+                row = {
+                    "Project Code": p["project_code"],
+                    "Project Name": p["project_name"],
+                    "Department": d,
+                    "Required Hours": p[f"{d.lower()}_hours"],
+                    "Start Date": p.get(f"{d.lower()}_start_date") or p["start_date"],
+                    "End Date": p["end_date"],
+                    "Loading Type": p["loading_type"],
+                }
 
-            rows_out.append(row)
+                for wc in week_cols:
+                    row[wc] = (
+                        float(sub.loc[sub.week_start == wc, "demand_hours"].sum())
+                        if not sub.empty
+                        else 0.0
+                    )
 
-    alloc_df = pd.DataFrame(rows_out)
+                if p["loading_type"] == "manual":
+                    row["Manual Required"] = "Yes"
 
-    st.subheader("Project demand")
-    st.dataframe(alloc_df, use_container_width=True, hide_index=True)
+                rows_out.append(row)
+        alloc_df = pd.DataFrame(rows_out)
+    else:
+        alloc_df = pd.DataFrame()
 
-    bal = capacity_balance(weeks)
-    summary = []
-
-    for d in DISCIPLINES:
-        for label, col in [
-            ("available capacity", "available_capacity"),
-            ("allocated demand", "allocated_demand"),
-            ("over/under capacity", "over_under_capacity"),
-        ]:
-            row = {"Summary": f"{d} {label}"}
-
-            for wc in week_cols:
-                row[wc] = float(
-                    bal.loc[
-                        (bal.department == d) & (bal.week_start == wc),
-                        col,
-                    ].sum()
-                )
-
-            summary.append(row)
-
-    sdf = pd.DataFrame(summary)
+    if selected_departments and not bal.empty and "department" in bal.columns:
+        summary_bal = bal[bal.department.isin(selected_departments)]
+    else:
+        summary_bal = bal
+    sdf = summary_rows_from_capacity_balance(summary_bal, week_cols)
+    if selected_departments:
+        sdf = sdf[sdf["Summary"].str.split().str[0].isin(selected_departments)]
 
     st.subheader("Department summary")
 
@@ -332,3 +365,22 @@ with tab_allocations:
         use_container_width=True,
         hide_index=True,
     )
+
+    if show_project_demand:
+        st.subheader("Project demand")
+        st.dataframe(alloc_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Data status", expanded=False):
+        active_projects = get_projects(False)
+        resources = get_resources()
+        holiday_count = rows("SELECT COUNT(*) c FROM holidays")[0]["c"]
+        st.write(
+            {
+                "active_projects": 0 if active_projects.empty else len(active_projects),
+                "resources": 0 if resources.empty else len(resources),
+                "holiday_records": holiday_count,
+                "planning_weeks": len(weeks),
+                "data_version": data_version,
+                "last_updated_at": get_last_updated_at(),
+            }
+        )

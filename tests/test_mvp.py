@@ -15,12 +15,14 @@ from app.services.mvp import (
     import_approved_holidays,
     import_default_projects,
     import_sample_roster,
+    get_data_version,
     load_projects_csv,
     normalise_date_for_db,
     prepare_date_columns_for_editor,
     save_projects,
     save_resources,
     recalculate_holiday_totals,
+    summary_rows_from_capacity_balance,
     weekly_department_capacity,
     weekly_project_demand,
 )
@@ -37,6 +39,60 @@ class MvpWorkflowTests(unittest.TestCase):
     def tearDown(self):
         db.DB_PATH = self.old
         self.tmp.cleanup()
+
+
+    def test_capacity_balance_returns_rows_with_no_project_demand(self):
+        save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
+        weeks = [date(2026, 1, 5), date(2026, 1, 12)]
+        bal = capacity_balance(weeks)
+        self.assertEqual(len(bal), len(weeks) * 3)
+        self.assertTrue((bal["allocated_demand"] == 0).all())
+        rs = bal[(bal.department == "RS") & (bal.week_start == "2026-01-05")].iloc[0]
+        self.assertEqual(float(rs.over_under_capacity), float(rs.available_capacity))
+
+    def test_capacity_balance_returns_all_departments_for_each_week(self):
+        weeks = [date(2026, 1, 5), date(2026, 1, 12)]
+        bal = capacity_balance(weeks)
+        for week in weeks:
+            departments = set(bal[bal.week_start == week.isoformat()].department)
+            self.assertEqual(departments, {"RS", "GIS", "PLS"})
+
+    def test_project_save_increments_data_version(self):
+        before = get_data_version()
+        save_projects([{"project_code": "V1", "project_name": "Version", "start_date": "2026-01-05", "end_date": "2026-01-11", "loading_type": "even", "status": "active"}])
+        self.assertGreater(get_data_version(), before)
+
+    def test_resource_save_increments_data_version(self):
+        before = get_data_version()
+        save_resources([{"person_name": "Version Person", "department": "GIS", "weekly_hours": 37.5, "active_status": "active"}])
+        self.assertGreater(get_data_version(), before)
+
+    def test_holiday_import_increments_data_version(self):
+        save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
+        before = get_data_version()
+        path = Path(self.tmp.name) / "holidays.csv"
+        path.write_text("Employee,Date From,Date To,Days of Absence\nA,05/01/2026,05/01/2026,1\n")
+        import_approved_holidays(path)
+        self.assertGreater(get_data_version(), before)
+
+    def test_summary_rows_generated_from_empty_demand_capacity_balance(self):
+        weeks = [date(2026, 1, 5)]
+        bal = capacity_balance(weeks)
+        summary = summary_rows_from_capacity_balance(bal, [w.isoformat() for w in weeks])
+        self.assertEqual(
+            summary["Summary"].tolist(),
+            [
+                "RS available capacity",
+                "RS allocated demand",
+                "RS over/under capacity",
+                "GIS available capacity",
+                "GIS allocated demand",
+                "GIS over/under capacity",
+                "PLS available capacity",
+                "PLS allocated demand",
+                "PLS over/under capacity",
+            ],
+        )
 
     def test_prepare_project_dates_for_editor_are_datetime_compatible(self):
         frame = pd.DataFrame(
