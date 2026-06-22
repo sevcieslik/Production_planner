@@ -12,6 +12,8 @@ from app.services.mvp import (
     PROJECT_DATE_COLUMNS,
     RESOURCE_DATE_COLUMNS,
     capacity_balance,
+    capacity_summary_cards,
+    gantt_timeline_rows,
     import_approved_holidays,
     import_default_projects,
     import_sample_roster,
@@ -40,6 +42,39 @@ class MvpWorkflowTests(unittest.TestCase):
         db.DB_PATH = self.old
         self.tmp.cleanup()
 
+
+    def test_gantt_timeline_rows_one_per_non_zero_project_discipline_and_skips_zero(self):
+        save_projects([{"project_code": "P1", "project_name": "Project One", "rs_hours": 10, "gis_hours": 20, "pls_hours": 0, "start_date": "2026-01-05", "end_date": "2026-02-28", "loading_type": "even", "rs_start_date": "2026-01-05", "gis_start_date": "2026-01-12", "pls_start_date": "2026-01-05", "status": "active"}])
+        projects = pd.DataFrame(db.rows("SELECT * FROM mvp_projects"))
+        demand = weekly_project_demand()
+        bal = capacity_balance(week_starts(date(2026, 1, 1), date(2026, 3, 31)))
+        gantt = gantt_timeline_rows(projects, demand, bal, date(2026, 1, 1), date(2026, 3, 31))
+        self.assertEqual(len(gantt), 2)
+        self.assertEqual(set(gantt["discipline"]), {"RS", "GIS"})
+        self.assertNotIn("PLS", set(gantt["discipline"]))
+
+    def test_gantt_timeline_rows_parse_dates_respect_range_and_label(self):
+        save_projects([{"project_code": "P2", "project_name": "Project Two", "rs_hours": 10, "gis_hours": 0, "pls_hours": 0, "start_date": "2026-01-05", "end_date": "2026-03-15", "loading_type": "even", "rs_start_date": "2026-01-12", "status": "active"}])
+        projects = pd.DataFrame(db.rows("SELECT * FROM mvp_projects"))
+        gantt = gantt_timeline_rows(projects, weekly_project_demand(), capacity_balance(week_starts(date(2026, 2, 1), date(2026, 2, 28))), date(2026, 2, 1), date(2026, 2, 28))
+        self.assertEqual(len(gantt), 1)
+        row = gantt.iloc[0]
+        self.assertEqual(row["project_label"], "P2 | Project Two")
+        self.assertEqual(row["source_start"], date(2026, 1, 12))
+        self.assertEqual(row["source_end"], date(2026, 3, 15))
+        self.assertEqual(row["start"], date(2026, 2, 1))
+        self.assertEqual(row["end"], date(2026, 2, 28))
+
+    def test_capacity_summary_cards_returns_all_department_over_under_values(self):
+        save_projects([{"project_code": "P3", "project_name": "Project Three", "rs_hours": 10, "gis_hours": 20, "pls_hours": 30, "start_date": "2026-01-05", "end_date": "2026-01-11", "loading_type": "even", "rs_start_date": "2026-01-05", "gis_start_date": "2026-01-05", "pls_start_date": "2026-01-05", "status": "active"}])
+        demand = weekly_project_demand()
+        bal = capacity_balance([date(2026, 1, 5)])
+        summary = capacity_summary_cards(bal, demand, pd.DataFrame(db.rows("SELECT * FROM mvp_projects")), date(2026, 1, 5), date(2026, 1, 11))
+        self.assertIn("RS over_under_hours", summary)
+        self.assertIn("GIS over_under_hours", summary)
+        self.assertIn("PLS over_under_hours", summary)
+        self.assertEqual(summary["total_active_projects"], 1)
+        self.assertEqual(summary["total_required_hours"], 60.0)
 
     def test_capacity_balance_returns_rows_with_no_project_demand(self):
         save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
