@@ -818,6 +818,99 @@ def weekly_project_demand() -> pd.DataFrame:
 
 
 
+def project_timeline_label(project: dict) -> str:
+    """Return the Allocations timeline label for a project."""
+    parts = [
+        str(project.get("project_code") or "").strip(),
+        str(project.get("client") or "").strip(),
+        str(project.get("project_name") or "").strip(),
+    ]
+    return " | ".join(part for part in parts if part)
+
+
+def gantt_capacity_status(department: str, start_date: date, end_date: date, bal: pd.DataFrame) -> str:
+    if bal.empty or not {"week_start", "department", "available_capacity", "allocated_demand"}.issubset(bal.columns):
+        return "grey"
+    sub = bal[(bal["department"] == department) & (pd.to_datetime(bal["week_start"]).dt.date >= (start_date - timedelta(days=start_date.weekday()))) & (pd.to_datetime(bal["week_start"]).dt.date <= end_date)]
+    if sub.empty or float(sub["available_capacity"].sum() or 0) <= 0:
+        return "grey"
+    if (sub["allocated_demand"] > sub["available_capacity"]).any():
+        return "red"
+    utilisation = float(sub["allocated_demand"].sum() or 0) / float(sub["available_capacity"].sum() or 1)
+    if utilisation >= 0.85:
+        return "amber"
+    return "green"
+
+
+def gantt_timeline_rows(projects: pd.DataFrame, demand: pd.DataFrame, bal: pd.DataFrame, planning_start: date, planning_end: date, selected_departments: list[str] | None = None) -> pd.DataFrame:
+    """Build one Gantt row per project/discipline with non-zero required hours."""
+    departments = selected_departments or DISCIPLINES
+    out = []
+    if projects.empty:
+        return pd.DataFrame()
+    for p in projects.to_dict("records"):
+        project_end = pd.to_datetime(p.get("end_date"), errors="coerce")
+        if pd.isna(project_end):
+            continue
+        project_end_date = project_end.date()
+        label = project_timeline_label(p)
+        for d in departments:
+            hours = float(p.get(f"{d.lower()}_hours") or 0)
+            if hours <= 0:
+                continue
+            discipline_start = pd.to_datetime(p.get(f"{d.lower()}_start_date") or p.get("start_date"), errors="coerce")
+            if pd.isna(discipline_start):
+                continue
+            start_date = discipline_start.date()
+            if project_end_date < planning_start or start_date > planning_end:
+                continue
+            clipped_start = max(start_date, planning_start)
+            clipped_end = min(project_end_date, planning_end)
+            if clipped_end < clipped_start:
+                continue
+            weekly_demand = 0.0
+            if not demand.empty and {"project_code", "department", "week_start", "demand_hours"}.issubset(demand.columns):
+                sub = demand[(demand["project_code"] == p.get("project_code")) & (demand["department"] == d)]
+                sub = sub[(pd.to_datetime(sub["week_start"]).dt.date >= (planning_start - timedelta(days=planning_start.weekday()))) & (pd.to_datetime(sub["week_start"]).dt.date <= planning_end)]
+                active_weeks = max(len(sub.index), 1)
+                weekly_demand = round(float(sub["demand_hours"].sum() or 0) / active_weeks, 2)
+            status = gantt_capacity_status(d, clipped_start, clipped_end, bal)
+            out.append({
+                "project_label": label,
+                "project_code": p.get("project_code"),
+                "project_name": p.get("project_name"),
+                "discipline": d,
+                "start": clipped_start,
+                "end": clipped_end,
+                "source_start": start_date,
+                "source_end": project_end_date,
+                "required_hours": hours,
+                "loading_type": p.get("loading_type"),
+                "total_weekly_demand": weekly_demand,
+                "capacity_status": status,
+            })
+    return pd.DataFrame(out)
+
+
+def capacity_summary_cards(bal: pd.DataFrame, demand: pd.DataFrame, projects: pd.DataFrame, planning_start: date, planning_end: date) -> dict[str, float]:
+    summary: dict[str, float] = {}
+    for d in DISCIPLINES:
+        if bal.empty or not {"department", "over_under_capacity"}.issubset(bal.columns):
+            value = 0.0
+        else:
+            sub = bal[bal["department"] == d]
+            value = round(float(sub["over_under_capacity"].sum() or 0), 2)
+        summary[f"{d} over_under_hours"] = value
+    active = 0 if projects.empty else len(projects.index)
+    total_required = 0.0
+    if not demand.empty and {"week_start", "demand_hours"}.issubset(demand.columns):
+        sub = demand[(pd.to_datetime(demand["week_start"]).dt.date >= (planning_start - timedelta(days=planning_start.weekday()))) & (pd.to_datetime(demand["week_start"]).dt.date <= planning_end)]
+        total_required = round(float(sub["demand_hours"].sum() or 0), 2)
+    summary["total_active_projects"] = active
+    summary["total_required_hours"] = total_required
+    return summary
+
+
 def summary_rows_from_capacity_balance(bal: pd.DataFrame, week_cols: list[str]) -> pd.DataFrame:
     required = {
         "week_start",

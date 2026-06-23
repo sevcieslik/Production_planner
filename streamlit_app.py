@@ -5,6 +5,11 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+try:
+    import plotly.graph_objects as go
+except ImportError:  # pragma: no cover
+    go = None
+
 from app.data.db import execute, initialize_database, rows
 from app.services.mvp import (
     DISCIPLINES,
@@ -15,12 +20,14 @@ from app.services.mvp import (
     RESOURCE_FIELDS,
     RESOURCE_STATUSES,
     capacity_balance,
+    capacity_summary_cards,
     ensure_mvp_schema,
     get_data_version,
     get_last_updated_at,
     get_projects,
     get_holidays,
     get_resources,
+    gantt_timeline_rows,
     import_approved_holidays,
     import_default_projects,
     import_sample_roster,
@@ -280,107 +287,125 @@ with tab_resources:
 
 
 with tab_allocations:
-    st.title("Allocations")
-    st.caption("Generated weekly demand and department capacity balance.")
+    st.title("Project Processing Planner – Allocation Timeline")
+    st.caption("Gantt-style processing timeline with detailed weekly tables hidden by default.")
+    st.markdown(
+        " ".join(
+            [
+                "<span style='display:inline-block;width:12px;height:12px;background:#2563eb;border-radius:3px'></span> RS = Remote Sensing",
+                "<span style='display:inline-block;width:12px;height:12px;background:#16a34a;border-radius:3px;margin-left:1rem'></span> GIS = GIS Processing",
+                "<span style='display:inline-block;width:12px;height:12px;background:#7c3aed;border-radius:3px;margin-left:1rem'></span> PLS = PLS-CADD",
+            ]
+        ),
+        unsafe_allow_html=True,
+    )
 
     data_version = get_data_version()
+    last_updated = get_last_updated_at() or date.today().isoformat()
+    st.caption(f"Last updated: {last_updated}")
     week_key = tuple(w.isoformat() for w in weeks)
     week_cols = list(week_key)
 
     with st.expander("Allocation controls", expanded=False):
-        selected_departments = st.multiselect(
-            "Departments", DISCIPLINES, default=DISCIPLINES
-        )
+        selected_departments = st.multiselect("Departments", DISCIPLINES, default=DISCIPLINES)
         active_only = st.checkbox("Show active projects only", value=True)
-        show_project_demand = st.checkbox(
-            "Show weekly project demand table", value=False
-        )
 
-    with st.spinner("Calculating capacity..."):
-        demand = cached_weekly_project_demand(
-            start.isoformat(), end.isoformat(), data_version
-        )
-        _capacity = cached_weekly_department_capacity(week_key, data_version)
+    with st.spinner("Calculating capacity timeline..."):
+        demand = cached_weekly_project_demand(start.isoformat(), end.isoformat(), data_version)
         bal = cached_capacity_balance(week_key, data_version)
 
     projects = get_projects(not active_only)
-    if not projects.empty and selected_departments:
-        rows_out = []
-        for p in projects.to_dict("records"):
-            for d in selected_departments:
-                if not demand.empty and {"project_code", "department", "week_start", "demand_hours"}.issubset(demand.columns):
-                    sub = demand[
-                        (demand.project_code == p["project_code"])
-                        & (demand.department == d)
-                    ]
-                else:
-                    sub = pd.DataFrame()
-
-                row = {
-                    "Project Code": p["project_code"],
-                    "Project Name": p["project_name"],
-                    "Department": d,
-                    "Required Hours": p[f"{d.lower()}_hours"],
-                    "Start Date": p.get(f"{d.lower()}_start_date") or p["start_date"],
-                    "End Date": p["end_date"],
-                    "Loading Type": p["loading_type"],
-                }
-
-                for wc in week_cols:
-                    row[wc] = (
-                        float(sub.loc[sub.week_start == wc, "demand_hours"].sum())
-                        if not sub.empty
-                        else 0.0
-                    )
-
-                if p["loading_type"] == "manual":
-                    row["Manual Required"] = "Yes"
-
-                rows_out.append(row)
-        alloc_df = pd.DataFrame(rows_out)
-    else:
-        alloc_df = pd.DataFrame()
-
     if selected_departments and not bal.empty and "department" in bal.columns:
         summary_bal = bal[bal.department.isin(selected_departments)]
     else:
         summary_bal = bal
+
+    summary = capacity_summary_cards(summary_bal, demand, projects, start, end)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    for col, dept in zip([c1, c2, c3], DISCIPLINES):
+        value = summary.get(f"{dept} over_under_hours", 0.0)
+        col.metric(f"{dept} over/under", f"{value:,.1f} h")
+    c4.metric("Active projects", f"{summary.get('total_active_projects', 0):,.0f}")
+    c5.metric("Required hours", f"{summary.get('total_required_hours', 0):,.1f} h")
+
+    gantt_df = gantt_timeline_rows(projects, demand, summary_bal, start, end, selected_departments)
+    st.subheader("Processing timeline")
+    status_colours = {"green": "#22c55e", "amber": "#f59e0b", "red": "#ef4444", "grey": "#9ca3af"}
+    discipline_colours = {"RS": "#2563eb", "GIS": "#16a34a", "PLS": "#7c3aed"}
+    status_labels = {"green": "OK", "amber": "Near capacity", "red": "Over capacity", "grey": "No/missing capacity"}
+
+    if gantt_df.empty:
+        st.info("No non-zero project discipline demand falls within the selected planning range.")
+    elif go is not None:
+        fig = go.Figure()
+        y_values = [f"{r.project_label}  ·  {r.discipline}" for r in gantt_df.itertuples()]
+        for row, y in zip(gantt_df.to_dict("records"), y_values):
+            start_ts = pd.Timestamp(row["start"])
+            end_ts = pd.Timestamp(row["end"])
+            duration_ms = max((end_ts - start_ts).days + 1, 1) * 24 * 60 * 60 * 1000
+            status = row["capacity_status"]
+            fig.add_trace(
+                go.Bar(
+                    x=[duration_ms],
+                    y=[y],
+                    base=[start_ts],
+                    orientation="h",
+                    marker={"color": discipline_colours[row["discipline"]], "line": {"color": status_colours[status], "width": 3}},
+                    text=[f"{row['discipline']} · {row['required_hours']:,.0f}h · {status_labels[status]}"],
+                    textposition="inside",
+                    hovertemplate=(
+                        "<b>%{y}</b><br>Discipline: " + row["discipline"] +
+                        f"<br>Required hours: {row['required_hours']:,.1f}" +
+                        f"<br>Start date: {row['source_start']}" +
+                        f"<br>End date: {row['source_end']}" +
+                        f"<br>Loading type: {row['loading_type']}" +
+                        f"<br>Total weekly demand: {row['total_weekly_demand']:,.1f} h" +
+                        f"<br>Capacity status: {status_labels[status]}<extra></extra>"
+                    ),
+                    showlegend=False,
+                )
+            )
+        fig.update_layout(
+            height=max(420, min(1100, 42 * len(gantt_df.index))),
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+            xaxis={"type": "date", "tickformat": "%b %Y", "dtick": "M1", "range": [pd.Timestamp(start), pd.Timestamp(end)]},
+            yaxis={"autorange": "reversed"},
+            barmode="overlay",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.dataframe(gantt_df[["project_label", "discipline", "start", "end", "required_hours", "capacity_status"]], use_container_width=True, hide_index=True)
+
+    rows_out = []
+    if not projects.empty and selected_departments:
+        for p in projects.to_dict("records"):
+            for d in selected_departments:
+                sub = demand[(demand.project_code == p["project_code"]) & (demand.department == d)] if not demand.empty and {"project_code", "department"}.issubset(demand.columns) else pd.DataFrame()
+                row = {"Project Code": p["project_code"], "Project Name": p["project_name"], "Department": d, "Required Hours": p[f"{d.lower()}_hours"], "Start Date": p.get(f"{d.lower()}_start_date") or p["start_date"], "End Date": p["end_date"], "Loading Type": p["loading_type"]}
+                for wc in week_cols:
+                    row[wc] = float(sub.loc[sub.week_start == wc, "demand_hours"].sum()) if not sub.empty else 0.0
+                rows_out.append(row)
+    alloc_df = pd.DataFrame(rows_out)
     sdf = summary_rows_from_capacity_balance(summary_bal, week_cols)
     if selected_departments:
         sdf = sdf[sdf["Summary"].str.split().str[0].isin(selected_departments)]
 
-    st.subheader("Department summary")
-
-    def colour(v):
-        if not isinstance(v, (int, float)):
-            return ""
-        if v < 0:
-            return "background-color:#ffc9c9"
-        if v == 0:
-            return "background-color:#e9ecef"
-        return "background-color:#d8f3dc"
-
-    st.dataframe(
-        sdf.style.map(colour, subset=week_cols),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    if show_project_demand:
-        st.subheader("Project demand")
+    with st.expander("Show weekly project demand table", expanded=False):
         st.dataframe(alloc_df, use_container_width=True, hide_index=True)
+
+    with st.expander("Show department capacity summary", expanded=False):
+        def colour(v):
+            if not isinstance(v, (int, float)):
+                return ""
+            if v < 0:
+                return "background-color:#ffc9c9"
+            if v == 0:
+                return "background-color:#e9ecef"
+            return "background-color:#d8f3dc"
+        st.dataframe(sdf.style.map(colour, subset=week_cols), use_container_width=True, hide_index=True)
 
     with st.expander("Data status", expanded=False):
         active_projects = get_projects(False)
         resources = get_resources()
         holiday_count = rows("SELECT COUNT(*) c FROM holidays")[0]["c"]
-        st.write(
-            {
-                "active_projects": 0 if active_projects.empty else len(active_projects),
-                "resources": 0 if resources.empty else len(resources),
-                "holiday_records": holiday_count,
-                "planning_weeks": len(weeks),
-                "data_version": data_version,
-                "last_updated_at": get_last_updated_at(),
-            }
-        )
+        st.write({"active_projects": 0 if active_projects.empty else len(active_projects), "resources": 0 if resources.empty else len(resources), "holiday_records": holiday_count, "planning_weeks": len(weeks), "data_version": data_version, "last_updated_at": last_updated})
