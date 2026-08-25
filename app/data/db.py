@@ -124,8 +124,8 @@ def execute(query: str, params: Iterable[Any] = (), *, user: str = 'System', aud
 def write_audit(conn: sqlite3.Connection, user: str, object_type: str, object_id: int | None, action: str,
                 previous: Any, new: Any, reason: str | None = None) -> None:
     conn.execute(
-        'INSERT INTO audit_log(timestamp,user_name,object_type,object_id,action,previous_value,new_value,reason) VALUES (?,?,?,?,?,?,?,?)',
-        (datetime.utcnow().isoformat(timespec='seconds'), user, object_type, object_id, action,
+        'INSERT INTO audit_log(timestamp,user_name,object_type,object_id,action,previous_value,new_value,reason) VALUES (CURRENT_TIMESTAMP,?,?,?,?,?,?,?)',
+        (user, object_type, object_id, action,
          json.dumps(previous, default=str) if previous is not None else None,
          json.dumps(new, default=str) if new is not None else None, reason),
     )

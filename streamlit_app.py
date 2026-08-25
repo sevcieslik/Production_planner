@@ -16,6 +16,11 @@ from app.services.mvp import (
     preview_holiday_snapshot, project_remaining_hours, project_health_plans, quick_allocation_values,
     save_internal_activities, save_manager_plan, save_projects, save_resources,
     validate_project_demand, week_starts, weekly_department_capacity, get_issues, update_issue,
+    parse_audit_timestamps,
+)
+from app.services.setup_transfer import (
+    apply_planner_setup, apply_project_import, export_planner_setup,
+    export_projects_csv, preview_planner_setup, preview_project_import,
 )
 
 st.set_page_config(page_title="Production Capacity Planner", layout="wide")
@@ -315,18 +320,54 @@ def administration_view() -> None:
         edited=st.data_editor(base,num_rows="dynamic",hide_index=True,use_container_width=True)
         if st.button("Save internal activities",disabled=not user): save_internal_activities(edited.to_dict("records"),user); refresh()
     with imports_tab:
-        history=pd.DataFrame(rows("SELECT id,filename,imported_by,imported_at,record_count,unmatched_count,summary_json FROM holiday_imports ORDER BY id DESC")); st.subheader("Import history"); st.dataframe(history,hide_index=True,use_container_width=True)
+        st.subheader("Planner setup")
+        st.caption("Move projects, resources, manager weekly allocations, internal activities and non-sensitive Employee ID mappings. Holidays, audit and authentication are not included.")
+        today_name=date.today().isoformat()
+        st.download_button("Download planner setup",export_planner_setup(),f"production_planner_setup_{today_name}.zip","application/zip")
+        setup_upload=st.file_uploader("Upload planner setup",type=["zip"],key="planner_setup")
+        if setup_upload:
+            setup_preview=preview_planner_setup(setup_upload)
+            if not setup_preview.get("valid"):
+                for error in setup_preview.get("errors",[]): st.error(error)
+            else:
+                st.markdown("#### Planner setup preview")
+                p,r,a,i=st.columns(4)
+                p.metric("Projects",f"{setup_preview['projects']['new']} new · {setup_preview['projects']['updated']} updated")
+                r.metric("Resources",f"{setup_preview['resources']['new']} new · {setup_preview['resources']['updated']} updated")
+                a.metric("Weekly allocations",setup_preview["allocations"]["rows"])
+                i.metric("Internal activities",f"{setup_preview['activities']['new']} new · {setup_preview['activities']['updated']} updated")
+                st.caption(f"Allocation projects matched: {setup_preview['allocations']['projects_matched']}. Existing data absent from the ZIP is retained.")
+                if st.button("Apply planner setup",type="primary"):
+                    try: apply_planner_setup(setup_preview,user); st.success("Planner setup imported."); refresh()
+                    except ValueError as exc: st.error(str(exc))
+        st.divider(); st.subheader("Project import")
+        st.download_button("Download projects CSV",export_projects_csv(),f"production_planner_projects_{today_name}.csv","text/csv")
+        project_upload=st.file_uploader("Upload projects CSV",type=["csv"],key="project_csv")
+        if project_upload:
+            project_preview=preview_project_import(project_upload)
+            c1,c2,c3,c4=st.columns(4); c1.metric("New projects",project_preview["new"]); c2.metric("Updated projects",project_preview["updated"]); c3.metric("Unchanged projects",project_preview["unchanged"]); c4.metric("Invalid records",project_preview["invalid"])
+            for error in project_preview["errors"]: st.error(error)
+            for change in project_preview["changes"]:
+                with st.expander(f"{change['project_code']} | {change['project_name']}"):
+                    st.dataframe(pd.DataFrame(change["differences"]).rename(columns={"field":"Field","current":"Current","import":"Import"}),hide_index=True)
+            if st.button("Apply project import",type="primary",disabled=bool(project_preview["errors"])):
+                try: apply_project_import(project_preview,user); st.success("Project CSV imported."); refresh()
+                except ValueError as exc: st.error(str(exc))
+        with st.expander("Holiday import history"):
+            history=pd.DataFrame(rows("SELECT id,filename,imported_by,imported_at,record_count,unmatched_count,summary_json FROM holiday_imports ORDER BY id DESC")); st.dataframe(history,hide_index=True,use_container_width=True)
     with audit_tab:
         st.subheader("Append-only audit log")
         audit=pd.DataFrame(rows("SELECT id,timestamp,user_name,action,object_type,object_id,project_code,department,field_name,details FROM audit_log ORDER BY timestamp DESC,id DESC"))
         if audit.empty: st.info("No audited changes yet.")
         else:
-            dates=pd.to_datetime(audit.timestamp).dt.date; a1,a2,a3=st.columns(3); period=a1.date_input("Date range",(dates.min(),dates.max()),key="audit_dates"); users=["All",*sorted(audit.user_name.dropna().unique())]; au=a2.selectbox("User",users); entities=["All",*sorted(audit.object_type.dropna().unique())]; entity=a3.selectbox("Entity type",entities)
+            parsed=parse_audit_timestamps(audit.timestamp); valid_dates=parsed.dropna().dt.date
+            a1,a2,a3=st.columns(3); period=a1.date_input("Date range",(valid_dates.min(),valid_dates.max()),key="audit_dates") if not valid_dates.empty else None; users=["All",*sorted(audit.user_name.dropna().unique())]; au=a2.selectbox("User",users); entities=["All",*sorted(audit.object_type.dropna().unique())]; entity=a3.selectbox("Entity type",entities)
             b1,b2,b3=st.columns(3); projects=["All",*sorted(audit.project_code.dropna().unique())]; ap=b1.selectbox("Project",projects,key="audit_project"); departments=["All",*sorted(audit.department.dropna().unique())]; ad=b2.selectbox("Department",departments,key="audit_department"); actions=["All",*sorted(audit.action.dropna().unique())]; aa=b3.selectbox("Action",actions)
             filtered=audit.copy()
-            if isinstance(period,(tuple,list)) and len(period)==2: filtered=filtered[(dates>=period[0])&(dates<=period[1])]
+            if isinstance(period,(tuple,list)) and len(period)==2: filtered=filtered[(parsed.dt.date>=period[0])&(parsed.dt.date<=period[1])]
             for col,value in [("user_name",au),("object_type",entity),("project_code",ap),("department",ad),("action",aa)]:
                 if value!="All": filtered=filtered[filtered[col]==value]
+            filtered=filtered.assign(_parsed_timestamp=parsed.loc[filtered.index]).sort_values(["_parsed_timestamp","id"],ascending=False,na_position="last").drop(columns="_parsed_timestamp")
             st.dataframe(filtered.rename(columns={"timestamp":"When","user_name":"User","action":"Action","object_type":"Entity","project_code":"Project","department":"Department","details":"Summary"}),hide_index=True,use_container_width=True)
 
 

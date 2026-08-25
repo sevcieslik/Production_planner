@@ -80,6 +80,14 @@ RESOURCE_DATE_COLUMNS = [
 ]
 
 
+def parse_audit_timestamps(values: pd.Series) -> pd.Series:
+    """Parse legacy SQLite/Python audit timestamps without rejecting bad rows."""
+    try:
+        return pd.to_datetime(values, format="mixed", errors="coerce")
+    except TypeError:  # pandas < 2 has no ``format='mixed'`` support.
+        return values.apply(lambda value: pd.to_datetime(value, errors="coerce"))
+
+
 def ensure_mvp_schema() -> None:
     with connect() as conn:
         conn.executescript(
