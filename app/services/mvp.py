@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import re
 from pathlib import Path
 from typing import Any, Iterable
+from collections import defaultdict
 
 import pandas as pd
 
@@ -192,6 +193,35 @@ def ensure_mvp_schema() -> None:
               open_escalations INTEGER NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS holiday_imports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              filename TEXT NOT NULL,
+              imported_by TEXT NOT NULL,
+              imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              record_count INTEGER NOT NULL DEFAULT 0,
+              unmatched_count INTEGER NOT NULL DEFAULT 0,
+              summary_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS resource_employee_ids (
+              employee_id TEXT PRIMARY KEY,
+              resource_id INTEGER NOT NULL REFERENCES mvp_resources(id) ON DELETE CASCADE,
+              employee_name TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS internal_activities (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              activity_name TEXT NOT NULL,
+              department TEXT NOT NULL CHECK(department IN ('RS','GIS','PLS')),
+              start_week TEXT NOT NULL,
+              end_week TEXT NOT NULL,
+              planned_hours_per_week REAL NOT NULL DEFAULT 0 CHECK(planned_hours_per_week >= 0),
+              active INTEGER NOT NULL DEFAULT 1,
+              notes TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             -- harmless when created on a fresh database; ignored below for existing DBs
 
             INSERT OR IGNORE INTO settings(key,value)
@@ -218,6 +248,13 @@ def ensure_mvp_schema() -> None:
         for column, definition in additions.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE mvp_projects ADD COLUMN {column} {definition}")
+        holiday_columns = {r[1] for r in conn.execute("PRAGMA table_info(holidays)")}
+        for column, definition in {
+            "employee_id": "TEXT", "status": "TEXT NOT NULL DEFAULT 'active'",
+            "import_id": "INTEGER REFERENCES holiday_imports(id)",
+        }.items():
+            if column not in holiday_columns:
+                conn.execute(f"ALTER TABLE holidays ADD COLUMN {column} {definition}")
 
 
 
@@ -607,6 +644,117 @@ def save_manager_plan(frame: pd.DataFrame, weeks: list[date], department: str, u
         increment_data_version(conn)
 
 
+def quick_allocation_values(mode: str, weeks: list[date], *, people: float = 0,
+                            hours_per_person: float = 37.5, hours_per_week: float = 0,
+                            remaining_hours: float = 0) -> list[float]:
+    """Turn a manager-friendly allocation request into weekly source values."""
+    if not weeks:
+        return []
+    if mode == "People":
+        value = max(float(people), 0) * max(float(hours_per_person), 0)
+        return [round(value, 2)] * len(weeks)
+    if mode == "Hours/week":
+        return [round(max(float(hours_per_week), 0), 2)] * len(weeks)
+    if mode == "Spread remaining":
+        return spread_hours(max(float(remaining_hours), 0), weeks, "even")
+    raise ValueError(f"Unknown allocation mode: {mode}")
+
+
+def project_remaining_hours(project_code: str, department: str) -> float:
+    projects = get_projects(True)
+    match = projects[projects.project_code == project_code] if not projects.empty else pd.DataFrame()
+    if match.empty:
+        raise ValueError(f"Unknown project: {project_code}")
+    project = match.iloc[0]
+    return round(max(float(project[f"{department.lower()}_hours"] or 0) -
+                     float(project[f"actual_{department.lower()}_hours"] or 0), 0), 2)
+
+
+def apply_quick_allocation(project_code: str, department: str, weeks: list[date], values: list[float],
+                           user: str, operation: str = "add", allow_overallocation: bool = False) -> None:
+    """Add to or replace only one project's selected manager-plan cells."""
+    if len(weeks) != len(values) or operation not in {"add", "replace"}:
+        raise ValueError("Invalid allocation request.")
+    remaining = project_remaining_hours(project_code, department)
+    with connect() as conn:
+        existing_total = float(conn.execute(
+            "SELECT COALESCE(SUM(planned_hours),0) total FROM manager_weekly_plan WHERE project_code=? AND department=?",
+            (project_code, department)).fetchone()["total"] or 0)
+        selected = {r["week_start"]: float(r["planned_hours"]) for r in conn.execute(
+            "SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=?",
+            (project_code, department)).fetchall()}
+        selected_old = sum(selected.get(w.isoformat(), 0) for w in weeks)
+        new_selected = sum((selected.get(w.isoformat(), 0) + max(float(v), 0)) if operation == "add"
+                           else max(float(v), 0) for w, v in zip(weeks, values))
+        new_total = existing_total - selected_old + new_selected
+        if new_total > remaining + 0.005 and not allow_overallocation:
+            raise ValueError(f"Allocation would plan {new_total:.2f} h against {remaining:.2f} remaining hours. Confirm override to continue.")
+        for week, value in zip(weeks, values):
+            old = selected.get(week.isoformat(), 0)
+            hours = old + max(float(value), 0) if operation == "add" else max(float(value), 0)
+            conn.execute("""INSERT INTO manager_weekly_plan(project_code,department,week_start,planned_hours,updated_by)
+                            VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
+                            planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                         (project_code, department, week.isoformat(), round(hours, 2), user))
+        increment_data_version(conn)
+
+
+def clear_future_allocation(project_code: str, department: str, from_week: date, user: str) -> int:
+    from_week = from_week - timedelta(days=from_week.weekday())
+    with connect() as conn:
+        cur = conn.execute("UPDATE manager_weekly_plan SET planned_hours=0,updated_by=?,updated_at=CURRENT_TIMESTAMP "
+                           "WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0",
+                           (user, project_code, department, from_week.isoformat()))
+        increment_data_version(conn)
+        return cur.rowcount
+
+
+def move_allocation(project_code: str, department: str, offset_weeks: int, planning_start: date,
+                    planning_end: date, user: str) -> dict[str, float | int]:
+    """Move all in-range cells atomically; collisions are combined and hours preserved."""
+    with connect() as conn:
+        range_start = planning_start - timedelta(days=planning_start.weekday())
+        range_end = planning_end - timedelta(days=planning_end.weekday())
+        source = conn.execute("SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=? "
+                              "AND week_start BETWEEN ? AND ? AND planned_hours<>0",
+                              (project_code, department, range_start.isoformat(), range_end.isoformat())).fetchall()
+        moved: dict[str, float] = defaultdict(float); outside = 0.0
+        for row in source:
+            target = date.fromisoformat(row["week_start"]) + timedelta(weeks=offset_weeks)
+            if target < range_start or target > range_end:
+                outside += float(row["planned_hours"]); continue
+            moved[target.isoformat()] += float(row["planned_hours"])
+        if outside:
+            return {"moved_hours": 0.0, "outside_hours": round(outside, 2), "rows": 0}
+        conn.execute("UPDATE manager_weekly_plan SET planned_hours=0,updated_by=? WHERE project_code=? AND department=? "
+                     "AND week_start BETWEEN ? AND ?", (user, project_code, department,
+                     range_start.isoformat(), range_end.isoformat()))
+        for target, hours in moved.items():
+            conn.execute("""INSERT INTO manager_weekly_plan(project_code,department,week_start,planned_hours,updated_by)
+                            VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
+                            planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                         (project_code, department, target, round(hours, 2), user))
+        increment_data_version(conn)
+        return {"moved_hours": round(sum(moved.values()), 2), "outside_hours": 0.0, "rows": len(moved)}
+
+
+def monthly_allocation_matrix(start: date, end: date, department: str | None = None) -> pd.DataFrame:
+    """Read-only monthly aggregation of manager_weekly_plan (never another plan)."""
+    params: list[Any] = [(start - timedelta(days=start.weekday())).isoformat(),
+                         (end - timedelta(days=end.weekday())).isoformat()]
+    where = ""
+    if department and department != "All":
+        where = "AND department=?"; params.append(department)
+    data = pd.DataFrame(rows(f"SELECT project_code,week_start,planned_hours FROM manager_weekly_plan "
+                             f"WHERE week_start BETWEEN ? AND ? {where}", params))
+    months = pd.period_range(start=start, end=end, freq="M").strftime("%b %Y").tolist()
+    if data.empty:
+        return pd.DataFrame(columns=["Project", *months])
+    data["Month"] = pd.to_datetime(data.week_start).dt.strftime("%b %Y")
+    result = data.pivot_table(index="project_code", columns="Month", values="planned_hours", aggfunc="sum", fill_value=0)
+    return result.reindex(columns=months, fill_value=0).reset_index().rename(columns={"project_code": "Project"})
+
+
 def create_escalation(project_code: str, department: str, issue_type: str, impact_hours: float,
                       decision_required: str, owner: str, required_by: date) -> int:
     ensure_mvp_schema()
@@ -646,6 +794,9 @@ class MvpImportResult:
     unmatched_holiday_names: list[str] = field(default_factory=list)
     skipped_rows: int = 0
     validation_issues: list[str] = field(default_factory=list)
+    new_absences: int = 0
+    changed_absences: int = 0
+    removed_absences: int = 0
 
 
 def _column_map(columns: Iterable[object]) -> dict[str, str]:
@@ -770,46 +921,101 @@ def _working_days(start: date, end: date) -> list[date]:
     return out
 
 
-def import_approved_holidays(path: str | Path = "sample-data/Employee Holiday - Approved - From 01_01_2026 to 31_12_2026 .xls") -> MvpImportResult:
-    ensure_mvp_schema(); result = MvpImportResult(); df = _read_sample_table(path); cmap = _column_map(df.columns)
+def parse_employee_identity(value: Any) -> tuple[str | None, str]:
+    raw = " ".join(str(value or "").split())
+    found = re.search(r"\((\d+)\)\s*$", raw)
+    employee_id = found.group(1) if found else None
+    name = re.sub(r"\s*\(\d+\)\s*$", "", raw).strip()
+    if "," in name:
+        family, given = [part.strip() for part in name.split(",", 1)]
+        name = f"{given} {family}".strip()
+    return employee_id, name
+
+
+def preview_holiday_snapshot(path: str | Path | Any) -> dict[str, Any]:
+    """Parse and diff an approved-HR snapshot without changing SQLite."""
+    ensure_mvp_schema(); df = _read_sample_table(path); cmap = _column_map(df.columns)
+    resources = rows("SELECT * FROM mvp_resources")
+    by_name = {" ".join(r["person_name"].lower().split()): r for r in resources}
+    id_map = {r["employee_id"]: r for r in rows(
+        "SELECT m.employee_id,r.* FROM resource_employee_ids m JOIN mvp_resources r ON r.id=m.resource_id")}
+    desired: dict[tuple[int, str], dict] = {}; unmatched=[]; issues=[]; mappings=[]
+    for i, row in df.iterrows():
+        raw = row.get(cmap.get("person_name", ""), "")
+        employee_id, canonical_name = parse_employee_identity(raw)
+        person = id_map.get(employee_id) if employee_id else None
+        if not person:
+            person = by_name.get(" ".join(canonical_name.lower().split()))
+        if not person:
+            unmatched.append(str(raw).strip()); continue
+        if employee_id:
+            mappings.append((employee_id, person["id"], canonical_name))
+        start = _parse_date(row.get(cmap.get("start_date", "")))
+        end = _parse_date(row.get(cmap.get("end_date", ""))) or start
+        if not start:
+            issues.append(f"row {i + 2}: missing holiday date"); continue
+        workdays = _working_days(start, end)
+        duration_days = _number(row.get(cmap.get("days", ""), None), None)
+        total_hours = _number(row.get(cmap.get("hours", ""), None), None)
+        if total_hours is None:
+            total_hours = (duration_days if duration_days is not None else len(workdays)) * float(person["weekly_hours"] or 0) / 5
+        per_day = round(total_hours / max(len(workdays), 1), 2)
+        for day in workdays:
+            desired[(person["id"], day.isoformat())] = {
+                "resource_id": person["id"], "person_name": person["person_name"], "employee_id": employee_id,
+                "holiday_date": day.isoformat(), "hours": per_day,
+                "notes": str(row.get(cmap.get("notes", ""), "")).strip(),
+            }
+    current = {(r["resource_id"], r["holiday_date"]): dict(r) for r in rows(
+        "SELECT * FROM holidays WHERE source='hr-approved' AND status='active'")}
+    new = [v for k, v in desired.items() if k not in current]
+    changed = [v for k, v in desired.items() if k in current and
+               (round(float(current[k]["hours"]), 2) != v["hours"] or (current[k].get("employee_id") or None) != v["employee_id"])]
+    removed = [v for k, v in current.items() if k not in desired]
+    return {"records": list(desired.values()), "new": new, "changed": changed, "removed": removed,
+            "unmatched": sorted(set(unmatched)), "issues": issues, "mappings": mappings}
+
+
+def apply_holiday_snapshot(preview: dict[str, Any], filename: str, user: str) -> MvpImportResult:
+    """Synchronise active HR holidays and retain removed rows as cancelled audit data."""
+    import json
+    result = MvpImportResult(unmatched_holiday_names=preview["unmatched"], skipped_rows=len(preview["unmatched"]),
+                             validation_issues=preview["issues"], new_absences=len(preview["new"]),
+                             changed_absences=len(preview["changed"]), removed_absences=len(preview["removed"]))
     with connect() as conn:
-        people = {r["person_name"].strip().lower(): r for r in conn.execute("SELECT * FROM mvp_resources").fetchall()}
-        seen=set()
-        for i, row in df.iterrows():
-            name = str(row.get(cmap.get("person_name", ""), "")).strip()
-            if not name: continue
-            person = people.get(name.lower())
-            if not person:
-                result.unmatched_holiday_names.append(name); result.skipped_rows += 1; continue
-            start = _parse_date(row.get(cmap.get("start_date", "")))
-            end = _parse_date(row.get(cmap.get("end_date", ""))) or start
-            if not start:
-                result.skipped_rows += 1; result.validation_issues.append(f"{name}: missing holiday date"); continue
-            days = _working_days(start, end)
-            total_hours = _number(row.get(cmap.get("hours", ""), None), None)
-            if total_hours is None:
-                duration_days = _number(row.get(cmap.get("days", ""), None), None)
-                per_day = float(person["weekly_hours"] or 0) / 5
-                total_hours = per_day * (duration_days if duration_days is not None and len(days) <= 1 else len(days))
-            hours_per_day = total_hours / max(len(days), 1)
-            for d in days:
-                if d.year != 2026: result.validation_issues.append(f"{name}: holiday outside 2026 on {d.isoformat()}")
-                if hours_per_day < 0: result.validation_issues.append(f"{name}: negative holiday hours on {d.isoformat()}"); continue
-                key=(name.lower(), d.isoformat())
-                if key in seen: result.validation_issues.append(f"{name}: duplicate holiday on {d.isoformat()}")
-                seen.add(key)
-                cur = conn.execute("INSERT OR IGNORE INTO holidays(resource_id,person_name,holiday_date,hours,source,notes) VALUES (?,?,?,?,?,?)", (person["id"], name, d.isoformat(), round(hours_per_day,2), "sample-approved", str(row.get(cmap.get("notes", ""), "")).strip())).rowcount
-                if cur: result.imported_holiday_records_count += 1
+        cur = conn.execute("INSERT INTO holiday_imports(filename,imported_by,record_count,unmatched_count,summary_json) VALUES (?,?,?,?,?)",
+                           (filename, user, len(preview["records"]), len(preview["unmatched"]), json.dumps({k: len(preview[k]) for k in ("new","changed","removed")})))
+        import_id = cur.lastrowid
+        for employee_id, resource_id, name in preview["mappings"]:
+            conn.execute("INSERT INTO resource_employee_ids(employee_id,resource_id,employee_name) VALUES (?,?,?) "
+                         "ON CONFLICT(employee_id) DO UPDATE SET resource_id=excluded.resource_id,employee_name=excluded.employee_name,updated_at=CURRENT_TIMESTAMP",
+                         (employee_id, resource_id, name))
+        for old in preview["removed"]:
+            conn.execute("UPDATE holidays SET status='cancelled',import_id=? WHERE id=?", (import_id, old["id"]))
+        for record in preview["records"]:
+            existing = conn.execute("SELECT id FROM holidays WHERE resource_id=? AND holiday_date=? AND source='hr-approved' ORDER BY id DESC LIMIT 1",
+                                    (record["resource_id"], record["holiday_date"])).fetchone()
+            if existing:
+                conn.execute("UPDATE holidays SET person_name=?,employee_id=?,hours=?,notes=?,status='active',import_id=? WHERE id=?",
+                             (record["person_name"], record["employee_id"], record["hours"], record["notes"], import_id, existing["id"]))
+            else:
+                conn.execute("INSERT INTO holidays(resource_id,person_name,employee_id,holiday_date,hours,source,notes,status,import_id) VALUES (?,?,?,?,?,'hr-approved',?,'active',?)",
+                             (record["resource_id"], record["person_name"], record["employee_id"], record["holiday_date"], record["hours"], record["notes"], import_id))
+        result.imported_holiday_records_count = len(preview["records"])
+        increment_data_version(conn)
     recalculate_holiday_totals()
-    increment_data_version()
-    result.unmatched_holiday_names = sorted(set(result.unmatched_holiday_names))
     return result
+
+
+def import_approved_holidays(path: str | Path | Any = "sample-data/Employee Holiday - Approved - From 01_01_2026 to 31_12_2026 .xls") -> MvpImportResult:
+    preview = preview_holiday_snapshot(path)
+    return apply_holiday_snapshot(preview, str(getattr(path, "name", path)), "System")
 
 
 def recalculate_holiday_totals() -> int:
     ensure_mvp_schema()
     with connect() as conn:
-        conn.execute("UPDATE mvp_resources SET holiday_booked_hours=COALESCE((SELECT SUM(hours) FROM holidays h WHERE lower(h.person_name)=lower(mvp_resources.person_name)),0), updated_at=datetime('now')")
+        conn.execute("UPDATE mvp_resources SET holiday_booked_hours=COALESCE((SELECT SUM(hours) FROM holidays h WHERE h.resource_id=mvp_resources.id AND COALESCE(h.status,'active')='active'),0), updated_at=datetime('now')")
         changed = conn.execute("SELECT changes() c").fetchone()["c"]
         if changed:
             increment_data_version(conn)
@@ -823,7 +1029,7 @@ def get_holidays(department: str | None = None, person_name: str | None = None, 
     if start_date: wh.append("h.holiday_date>=?"); params.append(start_date)
     if end_date: wh.append("h.holiday_date<=?"); params.append(end_date)
     where = "WHERE " + " AND ".join(wh) if wh else ""
-    return pd.DataFrame(rows(f"SELECT h.id,h.person_name,r.department,h.holiday_date,h.hours,h.source,h.notes FROM holidays h LEFT JOIN mvp_resources r ON lower(r.person_name)=lower(h.person_name) {where} ORDER BY h.holiday_date,h.person_name", tuple(params)))
+    return pd.DataFrame(rows(f"SELECT h.id,h.person_name,r.department,h.holiday_date,h.hours,h.source,COALESCE(h.status,'active') status,h.notes FROM holidays h LEFT JOIN mvp_resources r ON r.id=h.resource_id {where} ORDER BY h.holiday_date,h.person_name", tuple(params)))
 
 
 def save_holidays(records: Iterable[dict]) -> None:
@@ -978,7 +1184,15 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
     # an unexplained utilisation factor.
     factor = 1.0
     resources = rows("SELECT * FROM mvp_resources")
-    holiday_rows = rows("SELECT person_name, holiday_date, hours FROM holidays")
+    holiday_rows = rows("SELECT resource_id, holiday_date, SUM(hours) hours FROM holidays "
+                        "WHERE COALESCE(status,'active')='active' GROUP BY resource_id,holiday_date")
+    holiday_by_resource_week: dict[tuple[int, str], float] = defaultdict(float)
+    for h in holiday_rows:
+        holiday_date = pd.to_datetime(h["holiday_date"], errors="coerce")
+        if not pd.isna(holiday_date):
+            day = holiday_date.date()
+            week_key = (day - timedelta(days=day.weekday())).isoformat()
+            holiday_by_resource_week[(h["resource_id"], week_key)] += float(h["hours"] or 0)
     out = []
 
     for w in weeks:
@@ -990,15 +1204,7 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
 
             dept = department_for_resource(r["id"], r["department"], w)
 
-            holiday_hours = 0.0
-            for h in holiday_rows:
-                holiday_date = pd.to_datetime(h["holiday_date"], errors="coerce")
-                if pd.isna(holiday_date):
-                    continue
-
-                if w <= holiday_date.date() <= w + timedelta(days=6):
-                    if h["person_name"] == r["person_name"]:
-                        holiday_hours += float(h["hours"] or 0)
+            holiday_hours = holiday_by_resource_week.get((r["id"], w.isoformat()), 0.0)
 
             totals[dept] += max(
                 float(r["weekly_hours"] or 0)
@@ -1197,6 +1403,75 @@ def summary_rows_from_capacity_balance(bal: pd.DataFrame, week_cols: list[str]) 
             summary.append(row)
     return pd.DataFrame(summary)
 
+
+def save_internal_activities(records: Iterable[dict]) -> None:
+    ensure_mvp_schema()
+    with connect() as conn:
+        for record in records:
+            start = normalise_date_for_db(record.get("start_week")); end = normalise_date_for_db(record.get("end_week"))
+            if not record.get("activity_name") or record.get("department") not in DISCIPLINES or not start or not end:
+                continue
+            values = (record["activity_name"], record["department"], start, end,
+                      max(float(record.get("planned_hours_per_week") or 0), 0), int(bool(record.get("active", True))), record.get("notes"))
+            if record.get("id"):
+                conn.execute("UPDATE internal_activities SET activity_name=?,department=?,start_week=?,end_week=?,planned_hours_per_week=?,active=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             (*values, int(record["id"])))
+            else:
+                conn.execute("INSERT INTO internal_activities(activity_name,department,start_week,end_week,planned_hours_per_week,active,notes) VALUES (?,?,?,?,?,?,?)", values)
+        increment_data_version(conn)
+
+
+def get_internal_activities() -> pd.DataFrame:
+    ensure_mvp_schema()
+    return pd.DataFrame(rows("SELECT id,activity_name,department,start_week,end_week,planned_hours_per_week,active,notes FROM internal_activities ORDER BY active DESC,start_week,activity_name"))
+
+
+def internal_activity_by_week(weeks: list[date]) -> pd.DataFrame:
+    activities = get_internal_activities(); output=[]
+    for week in weeks:
+        for department in DISCIPLINES:
+            hours = 0.0
+            if not activities.empty:
+                mask = ((activities.department == department) & (activities.active.astype(bool)) &
+                        (activities.start_week <= week.isoformat()) & (activities.end_week >= week.isoformat()))
+                hours = float(activities.loc[mask, "planned_hours_per_week"].sum())
+            output.append({"week_start": week.isoformat(), "department": department, "internal_hours": round(hours, 2)})
+    return pd.DataFrame(output)
+
+
+def manager_allocations(weeks: list[date]) -> pd.DataFrame:
+    if not weeks:
+        return pd.DataFrame(columns=["project_code", "department", "week_start", "planned_hours"])
+    return pd.DataFrame(rows("SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan "
+                             "WHERE week_start BETWEEN ? AND ?",
+                             (weeks[0].isoformat(), weeks[-1].isoformat())))
+
+
+def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.DataFrame:
+    """Timeline periods derived first from explicit manager allocation, with labelled baseline fallback."""
+    projects = get_projects(False); allocations = manager_allocations(weeks); out=[]
+    if projects.empty:
+        return pd.DataFrame()
+    for p in projects.to_dict("records"):
+        for disc in ([department] if department and department != "All" else DISCIPLINES):
+            if float(p.get(f"{disc.lower()}_hours") or 0) <= 0: continue
+            sub = allocations[(allocations.project_code == p["project_code"]) & (allocations.department == disc) & (allocations.planned_hours > 0)] if not allocations.empty else pd.DataFrame()
+            explicit = not sub.empty
+            if explicit:
+                start = pd.to_datetime(sub.week_start).min().date(); end = pd.to_datetime(sub.week_start).max().date() + timedelta(days=6)
+                allocated = float(sub.planned_hours.sum())
+            else:
+                start = _parse_date(p.get(f"{disc.lower()}_start_date") or p.get("start_date")); end = _parse_date(p.get("end_date")); allocated = 0.0
+            if not start or not end or end < weeks[0] or start > weeks[-1] + timedelta(days=6): continue
+            remaining = max(float(p.get(f"{disc.lower()}_hours") or 0) - float(p.get(f"actual_{disc.lower()}_hours") or 0), 0)
+            out.append({"Project": project_timeline_label(p), "project_code": p["project_code"], "Discipline": disc,
+                        "Start": max(start, weeks[0]), "End": min(end, weeks[-1] + timedelta(days=6)),
+                        "Plan source": "Manager allocation" if explicit else "Forecast baseline",
+                        "Remaining hours": remaining, "Allocated hours": allocated,
+                        "Unplanned hours": max(remaining - allocated, 0), "Data available": p.get(f"{disc.lower()}_start_date"),
+                        "Required by": p.get("end_date")})
+    return pd.DataFrame(out)
+
 def capacity_balance(weeks: list[date]) -> pd.DataFrame:
     grid = pd.DataFrame(
         [
@@ -1225,14 +1500,14 @@ def capacity_balance(weeks: list[date]) -> pd.DataFrame:
             {"available_capacity": 0.0}
         )
 
-    dem = weekly_project_demand()
-    if dem.empty or not {"week_start", "department", "demand_hours"}.issubset(dem.columns):
+    dem = manager_allocations(weeks)
+    if dem.empty or not {"week_start", "department", "planned_hours"}.issubset(dem.columns):
         demand = grid.assign(allocated_demand=0.0)
     else:
         demand = (
-            dem.groupby(["week_start", "department"], as_index=False)["demand_hours"]
+            dem.groupby(["week_start", "department"], as_index=False)["planned_hours"]
             .sum()
-            .rename(columns={"demand_hours": "allocated_demand"})
+            .rename(columns={"planned_hours": "allocated_demand"})
         )
         demand = grid.merge(demand, on=["week_start", "department"], how="left").fillna(
             {"allocated_demand": 0.0}
@@ -1241,12 +1516,15 @@ def capacity_balance(weeks: list[date]) -> pd.DataFrame:
     merged = cap.merge(demand, on=["week_start", "department"], how="left").fillna(
         {"available_capacity": 0.0, "allocated_demand": 0.0}
     )
+    internal = internal_activity_by_week(weeks)
+    merged = merged.merge(internal, on=["week_start", "department"], how="left").fillna({"internal_hours": 0.0})
+    merged["total_allocated"] = (merged["allocated_demand"] + merged["internal_hours"]).round(2)
     merged["over_under_capacity"] = (
-        merged["available_capacity"] - merged["allocated_demand"]
+        merged["available_capacity"] - merged["total_allocated"]
     ).round(2)
     merged["status"] = merged.apply(
         lambda r: capacity_status(
-            (r["allocated_demand"] / r["available_capacity"])
+            (r["total_allocated"] / r["available_capacity"])
             if r["available_capacity"]
             else None,
             r["available_capacity"],
