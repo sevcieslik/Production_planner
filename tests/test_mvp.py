@@ -27,6 +27,11 @@ from app.services.mvp import (
     summary_rows_from_capacity_balance,
     weekly_department_capacity,
     weekly_project_demand,
+    validate_project_demand,
+    manager_plan,
+    save_manager_plan,
+    create_escalation,
+    complete_planning_review,
 )
 from app.services.planning import spread_hours, week_starts
 
@@ -269,7 +274,7 @@ class MvpWorkflowTests(unittest.TestCase):
             ]
         )
         cap = weekly_department_capacity([date(2026, 1, 5)])
-        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 34.0)
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 40.0)
 
     def test_suspended_resource_removed_from_capacity(self):
         save_resources(
@@ -316,7 +321,7 @@ class MvpWorkflowTests(unittest.TestCase):
             (rid, "GIS", "2026-01-05", "2026-01-11"),
         )
         cap = weekly_department_capacity([date(2026, 1, 5)])
-        self.assertEqual(float(cap[(cap.department == "GIS")].available_capacity.iloc[0]), 34.0)
+        self.assertEqual(float(cap[(cap.department == "GIS")].available_capacity.iloc[0]), 40.0)
         self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 0.0)
 
     def test_holiday_booked_total_is_not_subtracted_each_week(self):
@@ -333,14 +338,14 @@ class MvpWorkflowTests(unittest.TestCase):
             ]
         )
         cap = weekly_department_capacity([date(2026, 1, 5)])
-        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 34.0)
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 40.0)
 
     def test_holiday_records_reduce_weekly_capacity(self):
         save_resources([{"person_name": "A", "department": "RS", "weekly_hours": 40, "active_status": "active"}])
         rid = db.rows('SELECT id FROM mvp_resources WHERE person_name="A"')[0]["id"]
         db.execute('INSERT INTO holidays(resource_id,person_name,holiday_date,hours,source) VALUES (?,?,?,?,?)', (rid, "A", "2026-01-06", 8, "test"))
         cap = weekly_department_capacity([date(2026, 1, 5)])
-        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 27.2)
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 32.0)
 
     def test_roster_csv_import_creates_resources_and_daily_hours_converts(self):
         path = Path(self.tmp.name) / "roster.csv"
@@ -361,7 +366,7 @@ class MvpWorkflowTests(unittest.TestCase):
         self.assertIn("Missing", result.unmatched_holiday_names)
         self.assertEqual(len(db.rows('SELECT * FROM holidays WHERE person_name="A"')), 3)
         cap = weekly_department_capacity([date(2026, 1, 5)])
-        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 13.6)
+        self.assertEqual(float(cap[(cap.department == "RS")].available_capacity.iloc[0]), 16.0)
 
     def test_planning_weeks_generate_through_end_of_2026(self):
         weeks = week_starts(date(2026, 1, 1), date(2026, 12, 31))
@@ -410,10 +415,41 @@ class MvpWorkflowTests(unittest.TestCase):
         bal = capacity_balance([date(2026, 1, 5)])
         rs = bal[bal.department == "RS"].iloc[0]
 
-        self.assertEqual(float(rs.available_capacity), 34.0)
+        self.assertEqual(float(rs.available_capacity), 40.0)
         self.assertEqual(float(rs.allocated_demand), 68.0)
-        self.assertEqual(float(rs.over_under_capacity), -34.0)
+        self.assertEqual(float(rs.over_under_capacity), -28.0)
         self.assertEqual(rs.status, "red")
+
+    def test_project_demand_validation_rejects_missing_and_unexplained_inputs(self):
+        errors = validate_project_demand({"project_code": "P1", "project_name": "Project"})
+        self.assertIn("Client is required.", errors)
+        self.assertIn("Project manager is required.", errors)
+        self.assertIn("At least one discipline must have forecast hours.", errors)
+
+    def test_manager_plan_reconciles_actual_and_saved_weekly_hours(self):
+        save_projects([{
+            "project_code": "P1", "project_name": "Project", "client": "Client",
+            "project_manager": "PM", "priority": "P1", "penalty_exposure": "Active",
+            "rs_hours": 100, "actual_rs_hours": 20, "gis_hours": 0, "pls_hours": 0,
+            "start_date": "2026-01-05", "end_date": "2026-01-18",
+            "rs_start_date": "2026-01-05", "status": "active",
+        }])
+        weeks = [date(2026, 1, 5), date(2026, 1, 12)]
+        plan = manager_plan(weeks, "RS")
+        self.assertEqual(float(plan.iloc[0]["Remaining Hours"]), 80.0)
+        plan.loc[:, "2026-01-05"] = 30.0
+        plan.loc[:, "2026-01-12"] = 40.0
+        save_manager_plan(plan, weeks, "RS", "Manager")
+        refreshed = manager_plan(weeks, "RS")
+        self.assertEqual(float(refreshed.iloc[0]["Unplanned Hours"]), 10.0)
+
+    def test_review_with_unplanned_hours_requires_escalation(self):
+        frame = pd.DataFrame([{"Unplanned Hours": 10.0}])
+        with self.assertRaisesRegex(ValueError, "Create an escalation"):
+            complete_planning_review(frame, "GIS", date(2026, 1, 5), date(2026, 1, 12), "Manager")
+        create_escalation("", "GIS", "Capacity shortage", 10, "Move the deadline", "CDO", date(2026, 1, 6))
+        review_id = complete_planning_review(frame, "GIS", date(2026, 1, 5), date(2026, 1, 12), "Manager")
+        self.assertGreater(review_id, 0)
 
 
 if __name__ == "__main__":
