@@ -84,7 +84,7 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 def navigation_for_role(role: str) -> list[str]:
-    tabs = ["Projects", "Planning", "Principles"]
+    tabs = ["Projects", "Planning", "Principles", "Resource Management"]
     if role == "admin":
         tabs.append("Administration")
     return tabs

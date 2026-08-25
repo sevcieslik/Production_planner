@@ -15,6 +15,11 @@ from app.data.db import connect, execute, rows
 from app.services.planning import capacity_status, spread_hours, week_starts
 
 DISCIPLINES = ["RS", "GIS", "PLS"]
+TEMPORARY_ADJUSTMENT_TYPES = [
+    "Temporary assignment", "Secondment", "Unavailable", "Training",
+    "Internal activity", "Other",
+]
+SEQUENCE_GAP_THRESHOLD_DAYS = 7
 PROJECT_HEALTH_TOLERANCE_HOURS = 0.5
 LOADING_TYPES = ["even", "front_loaded", "back_loaded", "manual"]
 RESOURCE_STATUSES = [
@@ -231,6 +236,25 @@ def ensure_mvp_schema() -> None:
               notes TEXT,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS resource_capacity_adjustments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              resource_id INTEGER NOT NULL REFERENCES mvp_resources(id) ON DELETE RESTRICT,
+              adjustment_type TEXT NOT NULL,
+              destination_department TEXT CHECK(destination_department IN ('RS','GIS','PLS')),
+              start_date TEXT NOT NULL,
+              end_date TEXT NOT NULL,
+              capacity_percent REAL,
+              hours_per_week REAL,
+              reason TEXT,
+              active INTEGER NOT NULL DEFAULT 1,
+              created_by TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CHECK(capacity_percent IS NOT NULL OR hours_per_week IS NOT NULL)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_capacity_adjustments_resource_dates
+            ON resource_capacity_adjustments(resource_id,start_date,end_date,active);
 
             -- harmless when created on a fresh database; ignored below for existing DBs
 
@@ -1251,7 +1275,7 @@ def get_resources() -> pd.DataFrame:
     return pd.DataFrame(
         rows(
             f"""
-            SELECT {",".join(RESOURCE_FIELDS)}
+            SELECT id,{",".join(RESOURCE_FIELDS)}
             FROM mvp_resources
             ORDER BY department, person_name
             """
@@ -1334,6 +1358,7 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
     # an unexplained utilisation factor.
     factor = 1.0
     resources = rows("SELECT * FROM mvp_resources")
+    adjustments = rows("SELECT * FROM resource_capacity_adjustments WHERE active=1")
     holiday_rows = rows("SELECT resource_id, holiday_date, SUM(hours) hours FROM holidays "
                         "WHERE COALESCE(status,'active')='active' GROUP BY resource_id,holiday_date")
     holiday_by_resource_week: dict[tuple[int, str], float] = defaultdict(float)
@@ -1345,6 +1370,10 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
             holiday_by_resource_week[(h["resource_id"], week_key)] += float(h["hours"] or 0)
     out = []
 
+    adjustments_by_resource: dict[int, list[dict]] = defaultdict(list)
+    for adjustment in adjustments:
+        adjustments_by_resource[adjustment["resource_id"]].append(dict(adjustment))
+
     for w in weeks:
         totals = {d: 0.0 for d in DISCIPLINES}
 
@@ -1353,14 +1382,38 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
                 continue
 
             dept = department_for_resource(r["id"], r["department"], w)
-
+            weekly_hours = max(float(r["weekly_hours"] or 0), 0)
+            daily_baseline = weekly_hours / 5
             holiday_hours = holiday_by_resource_week.get((r["id"], w.isoformat()), 0.0)
-
-            totals[dept] += max(
-                float(r["weekly_hours"] or 0)
-                - holiday_hours,
-                0,
-            )
+            # Calculate by working day so partial-week assignments are represented
+            # without creating capacity, and overlapping reductions share a cap.
+            source_capacity = 0.0
+            moved = defaultdict(float)
+            active_adjustments = adjustments_by_resource.get(r["id"], [])
+            for day_index in range(5):
+                day = w + timedelta(days=day_index)
+                day_available = daily_baseline
+                day_holiday = min(holiday_hours, day_available)
+                holiday_hours -= day_holiday
+                day_available -= day_holiday
+                applicable = [a for a in active_adjustments
+                              if _parse_date(a["start_date"]) <= day <= _parse_date(a["end_date"])]
+                requests = []
+                for adjustment in applicable:
+                    requested = (weekly_hours * float(adjustment["capacity_percent"]) / 100 / 5
+                                 if adjustment["capacity_percent"] is not None
+                                 else float(adjustment["hours_per_week"] or 0) / 5)
+                    requests.append((adjustment, max(requested, 0)))
+                requested_total = sum(value for _, value in requests)
+                scale = min(1.0, day_available / requested_total) if requested_total else 1.0
+                for adjustment, requested in requests:
+                    amount = requested * scale
+                    if adjustment["destination_department"]:
+                        moved[adjustment["destination_department"]] += amount
+                source_capacity += max(day_available - min(requested_total, day_available), 0)
+            totals[dept] += source_capacity
+            for destination, amount in moved.items():
+                totals[destination] += amount
 
         for d, h in totals.items():
             out.append(
@@ -1372,6 +1425,107 @@ def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
             )
 
     return pd.DataFrame(out)
+
+
+def get_capacity_adjustments(include_inactive: bool = True) -> pd.DataFrame:
+    """Return operational adjustments with baseline roster facts and display status."""
+    ensure_mvp_schema()
+    where = "" if include_inactive else "WHERE a.active=1"
+    frame = pd.DataFrame(rows(f"""SELECT a.*,r.person_name,r.department AS home_department,
+        r.weekly_hours FROM resource_capacity_adjustments a JOIN mvp_resources r ON r.id=a.resource_id
+        {where} ORDER BY a.start_date DESC,a.id DESC"""))
+    if not frame.empty:
+        today = date.today().isoformat()
+        frame["period_status"] = frame.apply(
+            lambda r: "Inactive" if not bool(r.active) else "Upcoming" if r.start_date > today
+            else "Expired" if r.end_date < today else "Active", axis=1)
+    return frame
+
+
+def save_capacity_adjustment(record: dict, user: str) -> int:
+    """Create/update an audited adjustment; ambiguous overlapping capacity is rejected."""
+    ensure_mvp_schema()
+    resource_id = int(record.get("resource_id") or 0)
+    start = normalise_date_for_db(record.get("start_date")); end = normalise_date_for_db(record.get("end_date"))
+    kind = str(record.get("adjustment_type") or "").strip()
+    destination = str(record.get("destination_department") or "").strip().upper() or None
+    percent = record.get("capacity_percent"); hours = record.get("hours_per_week")
+    percent = None if percent in (None, "") else float(percent)
+    hours = None if hours in (None, "") else float(hours)
+    if not resource_id or not start or not end or start > end: raise ValueError("Resource and a valid date range are required.")
+    if not kind: raise ValueError("Adjustment type is required.")
+    if destination and destination not in DISCIPLINES: raise ValueError("Destination department is invalid.")
+    if (percent is None) == (hours is None): raise ValueError("Enter either capacity percentage or hours per week, not both.")
+    resource = rows("SELECT * FROM mvp_resources WHERE id=?", (resource_id,))
+    if not resource: raise ValueError("Resource not found.")
+    if destination == resource[0]["department"]: raise ValueError("Destination must differ from the home department.")
+    requested_percent = percent if percent is not None else hours / max(float(resource[0]["weekly_hours"]), .001) * 100
+    if requested_percent <= 0 or requested_percent > 100: raise ValueError("Adjustment must be greater than 0 and no more than 100% of contracted capacity.")
+    adjustment_id = record.get("id")
+    overlaps = rows("""SELECT * FROM resource_capacity_adjustments WHERE resource_id=? AND active=1
+        AND id<>? AND start_date<=? AND end_date>=?""", (resource_id, int(adjustment_id or 0), end, start))
+    for day in _working_days(date.fromisoformat(start), date.fromisoformat(end)) if record.get("active", True) else []:
+        total = requested_percent
+        for overlap in overlaps:
+            if _parse_date(overlap["start_date"]) <= day <= _parse_date(overlap["end_date"]):
+                total += (float(overlap["capacity_percent"]) if overlap["capacity_percent"] is not None
+                          else float(overlap["hours_per_week"] or 0) / max(float(resource[0]["weekly_hours"]), .001) * 100)
+        if total > 100.0001: raise ValueError(f"Active adjustments exceed 100% of capacity on {day.isoformat()}.")
+    values = (resource_id,kind,destination,start,end,percent,hours,str(record.get("reason") or "").strip(),
+              1 if record.get("active", True) else 0,user)
+    with connect() as conn:
+        old = conn.execute("SELECT * FROM resource_capacity_adjustments WHERE id=?", (adjustment_id,)).fetchone() if adjustment_id else None
+        if old:
+            conn.execute("""UPDATE resource_capacity_adjustments SET resource_id=?,adjustment_type=?,destination_department=?,
+                start_date=?,end_date=?,capacity_percent=?,hours_per_week=?,reason=?,active=?,created_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (*values, adjustment_id))
+            row_id = int(adjustment_id); action = "Temporary adjustment edited"
+        else:
+            cur = conn.execute("""INSERT INTO resource_capacity_adjustments(resource_id,adjustment_type,destination_department,
+                start_date,end_date,capacity_percent,hours_per_week,reason,active,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)""", values)
+            row_id = int(cur.lastrowid); action = "Temporary adjustment created"
+        new = dict(conn.execute("SELECT * FROM resource_capacity_adjustments WHERE id=?", (row_id,)).fetchone())
+        details = f"{resource[0]['person_name']} · {kind} · {start} to {end} · {resource[0]['department']} → {destination or 'unavailable'} · {percent if percent is not None else str(hours)+' h/week'} · {new['reason'] or 'No reason'}"
+        _audit(conn,user,action,"Resource capacity adjustment",row_id,department=resource[0]["department"],old=dict(old) if old else None,new=new,details=details)
+        increment_data_version(conn)
+        return row_id
+
+
+def sequence_analysis(weeks: list[date], gap_threshold_days: int = SEQUENCE_GAP_THRESHOLD_DAYS) -> pd.DataFrame:
+    """Conservative diagnostics based only on explicit manager allocations."""
+    columns = ["Category","Project","Upstream","Downstream","Upstream last week","Downstream first week",
+               "Gap days","Data available","Required By","Remaining Hours","Spare capacity in gap","Suggestion"]
+    if not weeks: return pd.DataFrame(columns=columns)
+    projects = get_projects(False)
+    allocations = pd.DataFrame(rows("SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan WHERE planned_hours>0"))
+    if projects.empty or allocations.empty: return pd.DataFrame(columns=columns)
+    balance = capacity_balance(weeks)
+    findings=[]
+    for project in projects.to_dict("records"):
+        pa = allocations[allocations.project_code == project["project_code"]]
+        for upstream, downstream in (("RS","GIS"),("GIS","PLS")):
+            up=pa[pa.department==upstream]; down=pa[pa.department==downstream]
+            if up.empty or down.empty: continue
+            up_last=date.fromisoformat(up.week_start.max()); down_first=date.fromisoformat(down.week_start.min())
+            data_available=_parse_date(project.get(f"{downstream.lower()}_start_date")); gap=(down_first-(up_last+timedelta(days=7))).days
+            remaining=max(float(project.get(f"{downstream.lower()}_hours") or 0)-float(project.get(f"actual_{downstream.lower()}_hours") or 0),0)
+            gap_weeks=[w for w in weeks if up_last < w < down_first and (not data_available or w>=monday_date(data_available))]
+            spare=sum(max(float(balance[(balance.department==downstream)&(balance.week_start==w.isoformat())].over_under_capacity.sum()),0) for w in gap_weeks)
+            base={"Project":f"{project['project_code']} · {project['project_name']}","Upstream":upstream,"Downstream":downstream,
+                  "Upstream last week":up_last,"Downstream first week":down_first,"Data available":data_available,
+                  "Required By":_parse_date(project.get("end_date")),"Remaining Hours":round(remaining,2),"Spare capacity in gap":round(spare,2)}
+            if gap >= gap_threshold_days:
+                findings.append({**base,"Category":"Gap","Gap days":gap,"Suggestion":f"Review whether {downstream} can start earlier."})
+                if spare > 0 and remaining > 0:
+                    findings.append({**base,"Category":"Downstream starvation","Gap days":gap,"Suggestion":f"{downstream} has spare capacity while waiting for the planned hand-off."})
+                    findings.append({**base,"Category":"Pull-forward opportunity","Gap days":gap,"Suggestion":f"Consider pulling ready {downstream} work forward; no allocation has been changed."})
+            overlap_days=(up_last-down_first).days
+            if overlap_days >= gap_threshold_days and (not data_available or data_available > down_first):
+                findings.append({**base,"Category":"Possible overlap","Gap days":-overlap_days,"Suggestion":f"Review whether {downstream} can begin before the upstream hand-off/data date."})
+    return pd.DataFrame(findings,columns=columns)
+
+
+def monday_date(value: date) -> date:
+    return value - timedelta(days=value.weekday())
 
 
 def weekly_project_demand() -> pd.DataFrame:
