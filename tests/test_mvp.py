@@ -104,6 +104,26 @@ class MvpWorkflowTests(unittest.TestCase):
         save_projects([{"project_code": "V1", "project_name": "Version", "start_date": "2026-01-05", "end_date": "2026-01-11", "loading_type": "even", "status": "active"}])
         self.assertGreater(get_data_version(), before)
 
+    def test_existing_project_can_change_code_and_all_related_plans_follow(self):
+        save_projects([{"project_code": "OLD", "project_name": "Original", "client": "A", "project_manager": "Manager", "start_date": "2026-01-05", "end_date": "2026-01-11", "rs_hours": 10, "rs_start_date": "2026-01-05", "loading_type": "even", "status": "active"}])
+        with db.connect() as conn:
+            conn.execute("INSERT INTO manager_weekly_plan(project_code,department,week_start,planned_hours,updated_by) VALUES ('OLD','RS','2026-01-05',5,'Tester')")
+            conn.execute("INSERT INTO planning_escalations(project_code,department,issue_type,decision_required,owner,required_by) VALUES ('OLD','RS','Scope','Review','Owner','2026-01-05')")
+
+        save_projects([{"_original_project_code": "OLD", "project_code": "NEW", "project_name": "Changed", "client": "B", "project_manager": "New manager", "start_date": "2025-12-01", "end_date": "2026-02-01", "rs_hours": 20, "rs_start_date": "2025-12-01", "loading_type": "even", "status": "on_hold"}])
+
+        changed = db.rows("SELECT * FROM mvp_projects WHERE project_code='NEW'")[0]
+        self.assertEqual(changed["project_name"], "Changed")
+        self.assertEqual(changed["client"], "B")
+        self.assertFalse(db.rows("SELECT 1 FROM mvp_projects WHERE project_code='OLD'"))
+        self.assertEqual(db.rows("SELECT project_code FROM manager_weekly_plan")[0]["project_code"], "NEW")
+        self.assertEqual(db.rows("SELECT project_code FROM planning_escalations")[0]["project_code"], "NEW")
+
+    def test_manager_plan_places_unplanned_hours_before_week_columns(self):
+        save_projects([{"project_code": "P", "project_name": "Plan", "start_date": "2026-01-05", "end_date": "2026-01-18", "rs_hours": 10, "rs_start_date": "2026-01-05", "loading_type": "even", "status": "active"}])
+        plan = manager_plan([date(2026, 1, 5), date(2026, 1, 12)], "RS")
+        self.assertLess(plan.columns.get_loc("Unplanned Hours"), plan.columns.get_loc("2026-01-05"))
+
     def test_resource_save_increments_data_version(self):
         before = get_data_version()
         save_resources([{"person_name": "Version Person", "department": "GIS", "weekly_hours": 37.5, "active_status": "active"}])

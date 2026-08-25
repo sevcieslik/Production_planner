@@ -42,6 +42,20 @@ def rerun() -> None:
     st.rerun()
 
 
+def capacity_chart(capacity_by_week: dict[str, float], planned_by_week: dict[str, float]) -> None:
+    """Render the shared capacity-versus-plan chart in chronological order."""
+    chart = pd.DataFrame(
+        {
+            "Available capacity": capacity_by_week,
+            "Planned demand": planned_by_week,
+        }
+    )
+    chart.index.name = "Week starting"
+    st.subheader("Capacity vs planned demand")
+    st.caption("Compare the hours the roster can deliver with the hours assigned in each week.")
+    st.line_chart(chart, x_label="Week starting", y_label="Hours", color=["#1f77b4", "#ff4b4b"])
+
+
 st.sidebar.title("Production Planner")
 st.sidebar.caption("Demand → capacity plan → escalation")
 user = st.sidebar.text_input("Your name", help="Recorded against manager planning changes and reviews.")
@@ -59,7 +73,11 @@ with demand_tab:
     options = ["Create new project"]
     if not existing.empty:
         options += [f"{r.project_code} · {r.project_name}" for r in existing.itertuples()]
-    selected = st.selectbox("Project", options)
+    selected = st.selectbox(
+        "Create or edit project",
+        options,
+        help="Select an existing project to change its scope, dates, ownership, status, or discipline forecasts.",
+    )
     current = {}
     if selected != options[0]:
         code = selected.split(" · ", 1)[0]
@@ -68,7 +86,8 @@ with demand_tab:
     with st.form("project_demand_form"):
         st.subheader("Project and contractual facts")
         a, b, c = st.columns(3)
-        project_code = a.text_input("Project code *", value=str(current.get("project_code") or ""), disabled=bool(current))
+        original_project_code = str(current.get("project_code") or "")
+        project_code = a.text_input("Project code *", value=original_project_code)
         project_name = b.text_input("Project name *", value=str(current.get("project_name") or ""))
         client = c.text_input("Client *", value=str(current.get("client") or ""))
         pm = a.text_input("Project manager *", value=str(current.get("project_manager") or ""))
@@ -101,6 +120,7 @@ with demand_tab:
     if submitted:
         record = {
             "project_code": project_code, "project_name": project_name, "client": client,
+            "_original_project_code": original_project_code or project_code,
             "project_manager": pm, "priority": priority, "penalty_exposure": penalty,
             "row_km": row_km, "cct_km": cct_km, "spus": spus,
             "start_date": start_date, "end_date": end_date, "loading_type": "even",
@@ -115,9 +135,12 @@ with demand_tab:
             for error in errors:
                 st.error(error)
         else:
-            save_projects([record])
-            st.success("Project demand saved. It is now available for manager planning.")
-            rerun()
+            try:
+                save_projects([record])
+                st.success("Project demand saved. The capacity plan now uses the latest project details.")
+                rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
     st.subheader("Demand register")
     register = get_projects(False)
@@ -130,6 +153,10 @@ with demand_tab:
 with capacity_tab:
     st.title("Capacity plan")
     st.caption("Processing managers smooth remaining demand against real recorded capacity, or escalate what cannot be resolved.")
+    st.caption(
+        "Use Planning start and Planning end in the sidebar to include historic or future weeks. "
+        "Every visible dated column can be edited independently."
+    )
     if not weeks:
         st.error("Planning end must not be before planning start.")
     else:
@@ -176,6 +203,7 @@ with capacity_tab:
             if unplanned:
                 st.caption(f"{unplanned:,.1f} hours are not yet assigned to a week.")
             st.info("Select RS, GIS or PLS above to edit and save that department's project plan.")
+            capacity_chart(total_capacity, total_demand)
         if department != "All":
             plan = manager_plan(weeks, department)
             cap = capacity[capacity.department == department].set_index("week_start")["available_capacity"].to_dict() if not capacity.empty else {}
@@ -198,6 +226,10 @@ with capacity_tab:
                 m3.metric("Weekly capacity shortage", f"{shortage:,.1f} h")
                 st.dataframe(summary, use_container_width=True, hide_index=True)
 
+                st.caption(
+                    "Enter hours directly in any dated column, including past weeks included in the sidebar date range. "
+                    "Unplanned Hours is kept beside Remaining Hours and updates from the saved allocation."
+                )
                 disabled = [c for c in plan.columns if c not in week_columns]
                 edited = st.data_editor(plan, hide_index=True, use_container_width=True, disabled=disabled,
                                         column_config={w: st.column_config.NumberColumn(w, min_value=0.0, step=1.0) for w in week_columns})
@@ -245,6 +277,12 @@ with capacity_tab:
                 st.caption("No escalations have been recorded.")
             else:
                 st.dataframe(escalations, use_container_width=True, hide_index=True)
+
+            if not plan.empty:
+                capacity_chart(
+                    {week: cap.get(week, 0.0) for week in week_columns},
+                    {week: float(plan[week].sum()) for week in week_columns},
+                )
 
 with st.sidebar.expander("Administration", expanded=False):
     st.caption("Operational roster maintenance is separated from project planning.")
