@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 
-from app.data.db import connect, rows
+from app.data.db import connect, execute, rows
 from app.services.planning import capacity_status, spread_hours, week_starts
 
 DISCIPLINES = ["RS", "GIS", "PLS"]
@@ -26,12 +26,19 @@ RESOURCE_STATUSES = [
 PROJECT_FIELDS = [
     "project_code",
     "project_name",
+    "client",
+    "project_manager",
+    "priority",
+    "penalty_exposure",
     "row_km",
     "cct_km",
     "spus",
     "rs_hours",
     "gis_hours",
     "pls_hours",
+    "actual_rs_hours",
+    "actual_gis_hours",
+    "actual_pls_hours",
     "start_date",
     "end_date",
     "loading_type",
@@ -39,6 +46,7 @@ PROJECT_FIELDS = [
     "gis_start_date",
     "pls_start_date",
     "status",
+    "assumptions",
 ]
 
 RESOURCE_FIELDS = [
@@ -77,12 +85,19 @@ def ensure_mvp_schema() -> None:
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               project_code TEXT NOT NULL UNIQUE,
               project_name TEXT NOT NULL,
+              client TEXT,
+              project_manager TEXT,
+              priority TEXT NOT NULL DEFAULT 'P3',
+              penalty_exposure TEXT NOT NULL DEFAULT 'None',
               row_km REAL NOT NULL DEFAULT 0,
               cct_km REAL NOT NULL DEFAULT 0,
               spus REAL NOT NULL DEFAULT 0,
               rs_hours REAL NOT NULL DEFAULT 0,
               gis_hours REAL NOT NULL DEFAULT 0,
               pls_hours REAL NOT NULL DEFAULT 0,
+              actual_rs_hours REAL NOT NULL DEFAULT 0,
+              actual_gis_hours REAL NOT NULL DEFAULT 0,
+              actual_pls_hours REAL NOT NULL DEFAULT 0,
               start_date TEXT NOT NULL,
               end_date TEXT NOT NULL,
               loading_type TEXT NOT NULL DEFAULT 'even',
@@ -91,6 +106,7 @@ def ensure_mvp_schema() -> None:
               pls_start_date TEXT,
               status TEXT NOT NULL DEFAULT 'active',
               archived INTEGER NOT NULL DEFAULT 0,
+              assumptions TEXT,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -142,10 +158,44 @@ def ensure_mvp_schema() -> None:
               value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS manager_weekly_plan (
+              project_code TEXT NOT NULL REFERENCES mvp_projects(project_code) ON DELETE CASCADE,
+              department TEXT NOT NULL CHECK(department IN ('RS','GIS','PLS')),
+              week_start TEXT NOT NULL,
+              planned_hours REAL NOT NULL CHECK(planned_hours >= 0),
+              updated_by TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(project_code, department, week_start)
+            );
+
+            CREATE TABLE IF NOT EXISTS planning_escalations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              project_code TEXT REFERENCES mvp_projects(project_code) ON DELETE SET NULL,
+              department TEXT NOT NULL CHECK(department IN ('RS','GIS','PLS')),
+              issue_type TEXT NOT NULL,
+              impact_hours REAL NOT NULL DEFAULT 0,
+              decision_required TEXT NOT NULL,
+              owner TEXT NOT NULL,
+              required_by TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'Open',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS planning_reviews (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              department TEXT NOT NULL CHECK(department IN ('RS','GIS','PLS')),
+              period_start TEXT NOT NULL,
+              period_end TEXT NOT NULL,
+              status TEXT NOT NULL,
+              completed_by TEXT NOT NULL,
+              completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              open_escalations INTEGER NOT NULL DEFAULT 0
+            );
+
             -- harmless when created on a fresh database; ignored below for existing DBs
 
             INSERT OR IGNORE INTO settings(key,value)
-            VALUES ('diminished_capacity_factor','0.85');
+            VALUES ('diminished_capacity_factor','1.0');
 
             INSERT OR IGNORE INTO settings(key,value)
             VALUES ('data_version','0');
@@ -158,6 +208,16 @@ def ensure_mvp_schema() -> None:
             conn.execute("ALTER TABLE holidays ADD COLUMN notes TEXT")
         except Exception:
             pass
+        additions = {
+            "client": "TEXT", "project_manager": "TEXT", "priority": "TEXT NOT NULL DEFAULT 'P3'",
+            "penalty_exposure": "TEXT NOT NULL DEFAULT 'None'", "actual_rs_hours": "REAL NOT NULL DEFAULT 0",
+            "actual_gis_hours": "REAL NOT NULL DEFAULT 0", "actual_pls_hours": "REAL NOT NULL DEFAULT 0",
+            "assumptions": "TEXT",
+        }
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(mvp_projects)")}
+        for column, definition in additions.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE mvp_projects ADD COLUMN {column} {definition}")
 
 
 
@@ -256,6 +316,10 @@ def load_projects_csv(path: str | Path = "sample-data/projects.csv") -> pd.DataF
     out["project_name"] = (
         df.get("project_name", df.get("Project Name", "")).astype(str).str.strip()
     )
+    out["client"] = df.get("client", "")
+    out["project_manager"] = df.get("project_manager", "")
+    out["priority"] = df.get("priority", "P3")
+    out["penalty_exposure"] = df.get("penalty_exposure", "None")
     out["row_km"] = pd.to_numeric(
         df.get("row_km", df.get("ROW (km)", 0)), errors="coerce"
     ).fillna(0)
@@ -274,6 +338,8 @@ def load_projects_csv(path: str | Path = "sample-data/projects.csv") -> pd.DataF
     out["pls_hours"] = pd.to_numeric(
         df.get("pls_hours", df.get("PLS Total", 0)), errors="coerce"
     ).fillna(0)
+    for discipline in DISCIPLINES:
+        out[f"actual_{discipline.lower()}_hours"] = 0.0
 
     out["start_date"] = df.get(
         "start_date", df.get("Production Start date", today)
@@ -299,6 +365,7 @@ def load_projects_csv(path: str | Path = "sample-data/projects.csv") -> pd.DataF
     out["status"] = (
         out["status"].fillna("active").astype(str).str.lower().replace({"archived": "archived"})
     )
+    out["assumptions"] = df.get("assumptions", "")
 
     return out[PROJECT_FIELDS]
 
@@ -323,12 +390,14 @@ def save_projects(records: Iterable[dict]) -> None:
                 INSERT INTO mvp_projects(
                     project_code,
                     project_name,
+                    client, project_manager, priority, penalty_exposure,
                     row_km,
                     cct_km,
                     spus,
                     rs_hours,
                     gis_hours,
                     pls_hours,
+                    actual_rs_hours, actual_gis_hours, actual_pls_hours,
                     start_date,
                     end_date,
                     loading_type,
@@ -337,17 +406,25 @@ def save_projects(records: Iterable[dict]) -> None:
                     pls_start_date,
                     status,
                     archived,
+                    assumptions,
                     updated_at
                 )
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
                 ON CONFLICT(project_code) DO UPDATE SET
                     project_name=excluded.project_name,
+                    client=excluded.client,
+                    project_manager=excluded.project_manager,
+                    priority=excluded.priority,
+                    penalty_exposure=excluded.penalty_exposure,
                     row_km=excluded.row_km,
                     cct_km=excluded.cct_km,
                     spus=excluded.spus,
                     rs_hours=excluded.rs_hours,
                     gis_hours=excluded.gis_hours,
                     pls_hours=excluded.pls_hours,
+                    actual_rs_hours=excluded.actual_rs_hours,
+                    actual_gis_hours=excluded.actual_gis_hours,
+                    actual_pls_hours=excluded.actual_pls_hours,
                     start_date=excluded.start_date,
                     end_date=excluded.end_date,
                     loading_type=excluded.loading_type,
@@ -356,25 +433,31 @@ def save_projects(records: Iterable[dict]) -> None:
                     pls_start_date=excluded.pls_start_date,
                     status=excluded.status,
                     archived=excluded.archived,
+                    assumptions=excluded.assumptions,
                     updated_at=datetime('now')
                 """,
                 (
                     code,
                     name,
+                    vals.get("client"), vals.get("project_manager"), vals.get("priority") or "P3",
+                    vals.get("penalty_exposure") or "None",
                     float(vals.get("row_km") or 0),
                     float(vals.get("cct_km") or 0),
                     float(vals.get("spus") or 0),
                     float(vals.get("rs_hours") or 0),
                     float(vals.get("gis_hours") or 0),
                     float(vals.get("pls_hours") or 0),
-                    normalise_date_for_db(vals.get("start_date"), date.today()),
-                    normalise_date_for_db(vals.get("end_date"), date.today() + timedelta(days=28)),
+                    float(vals.get("actual_rs_hours") or 0), float(vals.get("actual_gis_hours") or 0),
+                    float(vals.get("actual_pls_hours") or 0),
+                    normalise_date_for_db(vals.get("start_date")),
+                    normalise_date_for_db(vals.get("end_date")),
                     vals["loading_type"],
-                    normalise_date_for_db(vals.get("rs_start_date"), date.today()),
-                    normalise_date_for_db(vals.get("gis_start_date"), date.today()),
-                    normalise_date_for_db(vals.get("pls_start_date"), date.today()),
+                    normalise_date_for_db(vals.get("rs_start_date")) or normalise_date_for_db(vals.get("start_date")),
+                    normalise_date_for_db(vals.get("gis_start_date")) or normalise_date_for_db(vals.get("start_date")),
+                    normalise_date_for_db(vals.get("pls_start_date")) or normalise_date_for_db(vals.get("start_date")),
                     vals["status"],
                     archived,
+                    vals.get("assumptions"),
                 ),
             )
         increment_data_version(conn)
@@ -398,6 +481,128 @@ def get_projects(include_archived: bool = True) -> pd.DataFrame:
             ORDER BY project_code
             """
         )
+    )
+
+
+def validate_project_demand(record: dict) -> list[str]:
+    """Return business-input errors without inventing dates, quantities or hours."""
+    errors = []
+    labels = {
+        "project_code": "Project code", "project_name": "Project name", "client": "Client",
+        "project_manager": "Project manager", "start_date": "Production start",
+        "end_date": "Required completion",
+    }
+    for field, label in labels.items():
+        if not record.get(field):
+            errors.append(f"{label} is required.")
+    start = normalise_date_for_db(record.get("start_date"))
+    end = normalise_date_for_db(record.get("end_date"))
+    if start and end and start > end:
+        errors.append("Required completion must be on or after production start.")
+    total = 0.0
+    for discipline in DISCIPLINES:
+        hours = float(record.get(f"{discipline.lower()}_hours") or 0)
+        actual = float(record.get(f"actual_{discipline.lower()}_hours") or 0)
+        total += hours
+        if actual > hours:
+            errors.append(f"{discipline} actual hours cannot exceed its current forecast hours.")
+        if hours > 0 and not record.get(f"{discipline.lower()}_start_date"):
+            errors.append(f"{discipline} data-available date is required when {discipline} has hours.")
+    if total <= 0:
+        errors.append("At least one discipline must have forecast hours.")
+    return errors
+
+
+def manager_plan(weeks: list[date], department: str) -> pd.DataFrame:
+    """Return one project row with editable weekly manager-plan columns."""
+    projects = get_projects(False)
+    if projects.empty:
+        return pd.DataFrame()
+    saved = rows(
+        "SELECT project_code,week_start,planned_hours FROM manager_weekly_plan WHERE department=?",
+        (department,),
+    )
+    saved_map = {(r["project_code"], r["week_start"]): float(r["planned_hours"]) for r in saved}
+    baseline = weekly_project_demand()
+    output = []
+    for project in projects.to_dict("records"):
+        forecast = float(project.get(f"{department.lower()}_hours") or 0)
+        actual = float(project.get(f"actual_{department.lower()}_hours") or 0)
+        if forecast <= 0:
+            continue
+        row = {
+            "Priority": project.get("priority") or "P3",
+            "Project Code": project["project_code"],
+            "Project": project["project_name"],
+            "Forecast Hours": forecast,
+            "Actual Hours": actual,
+            "Remaining Hours": max(forecast - actual, 0),
+            "Data Available": project.get(f"{department.lower()}_start_date"),
+            "Required By": project.get("end_date"),
+        }
+        for week in weeks:
+            key = week.isoformat()
+            if (project["project_code"], key) in saved_map:
+                value = saved_map[(project["project_code"], key)]
+            elif not baseline.empty:
+                match = baseline[(baseline.project_code == project["project_code"]) &
+                                 (baseline.department == department) & (baseline.week_start == key)]
+                # Baseline demand represents forecast totals. Scale it to the
+                # remaining work so imported actuals are never planned twice.
+                value = (float(match.demand_hours.sum()) * max(forecast - actual, 0) / forecast) if not match.empty else 0.0
+            else:
+                value = 0.0
+            row[key] = round(value, 2)
+        row["Unplanned Hours"] = round(max(row["Remaining Hours"] - sum(row[w.isoformat()] for w in weeks), 0), 2)
+        output.append(row)
+    return pd.DataFrame(output).sort_values(["Priority", "Required By", "Project Code"])
+
+
+def save_manager_plan(frame: pd.DataFrame, weeks: list[date], department: str, user: str) -> None:
+    with connect() as conn:
+        for record in frame.to_dict("records"):
+            code = record["Project Code"]
+            remaining = float(record["Remaining Hours"] or 0)
+            values = [max(float(record.get(w.isoformat()) or 0), 0) for w in weeks]
+            if round(sum(values), 2) > round(remaining, 2):
+                raise ValueError(f"{code} plans more hours than its {remaining:.1f} remaining hours.")
+            for week, hours in zip(weeks, values):
+                conn.execute(
+                    """INSERT INTO manager_weekly_plan(project_code,department,week_start,planned_hours,updated_by)
+                       VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
+                       planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                    (code, department, week.isoformat(), hours, user),
+                )
+        increment_data_version(conn)
+
+
+def create_escalation(project_code: str, department: str, issue_type: str, impact_hours: float,
+                      decision_required: str, owner: str, required_by: date) -> int:
+    ensure_mvp_schema()
+    if not decision_required.strip() or not owner.strip():
+        raise ValueError("Decision required and owner are mandatory.")
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO planning_escalations(project_code,department,issue_type,impact_hours,
+               decision_required,owner,required_by) VALUES (?,?,?,?,?,?,?)""",
+            (project_code or None, department, issue_type, float(impact_hours), decision_required.strip(),
+             owner.strip(), required_by.isoformat()),
+        )
+        increment_data_version(conn)
+        return int(cur.lastrowid)
+
+
+def complete_planning_review(frame: pd.DataFrame, department: str, start: date, end: date, user: str) -> int:
+    ensure_mvp_schema()
+    unplanned = round(float(frame.get("Unplanned Hours", pd.Series(dtype=float)).sum()), 2)
+    open_count = rows("SELECT COUNT(*) c FROM planning_escalations WHERE department=? AND status='Open'", (department,))[0]["c"]
+    if unplanned > 0 and open_count == 0:
+        raise ValueError(f"{unplanned:.1f} hours remain unplanned. Create an escalation before completing the review.")
+    status = "Complete with escalations" if open_count else "Complete"
+    return execute(
+        """INSERT INTO planning_reviews(department,period_start,period_end,status,completed_by,open_escalations)
+           VALUES (?,?,?,?,?,?)""",
+        (department, start.isoformat(), end.isoformat(), status, user, open_count),
     )
 
 
@@ -728,7 +933,9 @@ def resource_active_for_week(resource: dict, week: date) -> bool:
 def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
     ensure_mvp_schema()
 
-    factor = setting_float("diminished_capacity_factor", 0.85)
+    # Capacity is reduced only by recorded absence. Do not conceal capacity behind
+    # an unexplained utilisation factor.
+    factor = 1.0
     resources = rows("SELECT * FROM mvp_resources")
     holiday_rows = rows("SELECT person_name, holiday_date, hours FROM holidays")
     out = []
