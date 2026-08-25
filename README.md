@@ -49,7 +49,67 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The local database is `data/production_planner.sqlite`. SQLite is suitable for a single writer; use a server database before enabling concurrent editing.
+The local database is `data/production_planner.sqlite` unless `DATABASE_PATH` overrides it.
+
+## Render pilot deployment
+
+This pilot supports multiple browser users through **one** Streamlit service and one SQLite database. Keep the Render service at exactly one instance; do not enable horizontal scaling or multiple worker processes for this SQLite deployment.
+
+### Environment variables
+
+```text
+DATABASE_PATH=/var/data/planner.db
+PLANNER_USERS_JSON=<JSON>
+```
+
+`PLANNER_USERS_JSON` is required. Missing or malformed configuration fails closed. The following is a fake example only (replace both placeholders with generated hashes):
+
+```json
+{
+  "admin@example.com": {
+    "name": "Planner Admin",
+    "password_hash": "<generated hash>",
+    "role": "admin"
+  },
+  "manager@example.com": {
+    "name": "Planning Manager",
+    "password_hash": "<generated hash>",
+    "role": "manager",
+    "active": true
+  }
+}
+```
+
+Roles are `admin` and `manager`. Both can use Projects and Planning; only admins receive the Administration tab. Set optional `active` to `false` to deny login.
+
+### Persistent Disk
+
+Create a Render Persistent Disk mounted at exactly:
+
+```text
+/var/data
+```
+
+### Build Command
+
+```text
+pip install -r requirements.txt
+```
+
+### Start Command
+
+```text
+streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
+```
+
+### Creating users
+
+1. Run `python scripts/generate_password_hash.py` locally and enter/confirm the password at the secure prompts.
+2. Copy the single salted PBKDF2-SHA256 hash printed by the script.
+3. Add or update the user's entry in the `PLANNER_USERS_JSON` Render secret. Do not commit the JSON or plaintext password.
+4. Redeploy or restart the Render service so new sessions load the updated environment.
+
+Successful login/logout and all existing writes use the authenticated display name and email in the audit log. This deliberately simple pilot has environment-managed users rather than self-service password reset, MFA, SSO, centralized session revocation, or brute-force rate limiting; expose it only to a controlled internal audience and use Render HTTPS.
 
 ## Key files
 
