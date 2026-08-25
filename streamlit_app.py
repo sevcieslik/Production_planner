@@ -17,6 +17,8 @@ from app.services.mvp import (
     save_internal_activities, save_manager_plan, save_projects, save_resources,
     validate_project_demand, week_starts, weekly_department_capacity, get_issues, update_issue,
     parse_audit_timestamps,
+    TEMPORARY_ADJUSTMENT_TYPES, get_capacity_adjustments, save_capacity_adjustment,
+    sequence_analysis,
 )
 from app.services.setup_transfer import (
     apply_planner_setup, apply_project_import, export_planner_setup,
@@ -173,10 +175,14 @@ def project_view() -> None:
     st.header("Projects")
     st.caption("Project demand remains the contractual and forecast register; allocation is managed separately.")
     existing = get_projects(True)
-    choices = ["Create new project"] + ([f"{r.project_code} · {r.project_name}" for r in existing.itertuples()] if not existing.empty else [])
-    selected = st.selectbox("Create or edit project", choices)
-    current = {} if selected == choices[0] else existing[existing.project_code == selected.split(" · ", 1)[0]].iloc[0].to_dict()
-    with st.form("project_form"):
+    st.subheader("Demand register")
+    register=existing[existing.archived == 0] if not existing.empty else existing
+    st.dataframe(register[["priority","project_code","project_name","client","project_manager","spus","row_km","cct_km","rs_hours","gis_hours","pls_hours","end_date","status"]] if not register.empty else register,hide_index=True,use_container_width=True)
+    with st.expander("+ Add or edit project", expanded=False):
+      choices = ["Create new project"] + ([f"{r.project_code} · {r.project_name}" for r in existing.itertuples()] if not existing.empty else [])
+      selected = st.selectbox("Create or edit project", choices)
+      current = {} if selected == choices[0] else existing[existing.project_code == selected.split(" · ", 1)[0]].iloc[0].to_dict()
+      with st.form("project_form"):
         st.subheader("Project and contractual facts")
         a,b,c = st.columns(3); original = str(current.get("project_code") or "")
         code=a.text_input("Project code *", original); name=b.text_input("Project name *", str(current.get("project_name") or "")); client=c.text_input("Client *", str(current.get("client") or ""))
@@ -187,23 +193,20 @@ def project_view() -> None:
         for disc in DISCIPLINES:
             x,y,z=st.columns(3); key=disc.lower(); hrs=x.number_input(f"{disc} forecast hours",0.0,value=float(current.get(f"{key}_hours") or 0),key=f"p_{key}_h"); available=y.date_input(f"{disc} data available",pd.to_datetime(current.get(f"{key}_start_date"),errors="coerce").date() if current.get(f"{key}_start_date") else None,key=f"p_{key}_d"); actual=float(current.get(f"actual_{key}_hours") or 0); z.metric(f"{disc} remaining",f"{max(hrs-actual,0):,.1f} h"); vals[key]=(hrs,available,actual)
         assumptions=st.text_area("Assumptions / evidence",str(current.get("assumptions") or "")); submitted=st.form_submit_button("Save project demand",type="primary")
-    if submitted:
+      if submitted:
         record={"project_code":code,"_original_project_code":original or code,"project_name":name,"client":client,"project_manager":pm,"priority":priority,"penalty_exposure":penalty,"row_km":row_km,"cct_km":cct_km,"spus":spus,"start_date":start,"end_date":end,"loading_type":"even","status":status,"assumptions":assumptions}
         for key,(hrs,available,actual) in vals.items(): record.update({f"{key}_hours":hrs,f"{key}_start_date":available,f"actual_{key}_hours":actual})
         errors=validate_project_demand(record)
         if errors:
             for error in errors: st.error(error)
         else: save_projects([record], user); st.success("Project demand saved."); refresh()
-    st.subheader("Demand register")
-    register=get_projects(False)
-    st.dataframe(register[["priority","project_code","project_name","client","project_manager","spus","row_km","cct_km","rs_hours","gis_hours","pls_hours","end_date","status"]] if not register.empty else register,hide_index=True,use_container_width=True)
 
 
 def planning_view() -> None:
     st.header("Planning")
     if not weeks: st.error("Planning end must not be before planning start."); return
     department=st.segmented_control("Department",["All",*DISCIPLINES],default="All")
-    overview,gantt_tab,weekly,issues_tab=st.tabs(["Overview","Gantt","Weekly allocation","Issues"])
+    overview,gantt_tab,sequence_tab,weekly,issues_tab=st.tabs(["Overview","Gantt","Sequence","Weekly allocation","Issues"])
     bal=capacity_balance(weeks); selected=bal if department=="All" else bal[bal.department==department]
     health=project_health_plans(planning_start,department)
     with overview:
@@ -222,7 +225,7 @@ def planning_view() -> None:
         cols=st.columns(4)
         for col,label in zip(cols,["Unplanned","Under-resourced","Well-resourced","Over-resourced"]): col.metric(label,int(counts.get(label,0)))
         chart=selected.groupby("week_start",as_index=False)[["available_capacity","total_allocated","over_under_capacity"]].sum(); chart["week_start"]=pd.to_datetime(chart.week_start)
-        st.line_chart(chart.set_index("week_start")); st.caption("Available capacity = contracted roster − absence. Balance = available capacity − project allocations − internal activities.")
+        st.line_chart(chart.set_index("week_start")); st.caption("Available capacity = contracted roster − approved absence − temporary unavailability, with temporary assignments moved between departments. Balance = available capacity − project allocations − internal activities.")
         if not health.empty: st.dataframe(health,hide_index=True,use_container_width=True)
     with gantt_tab:
         gantt=allocation_timeline(weeks,department)
@@ -236,6 +239,15 @@ def planning_view() -> None:
             st.altair_chart((bars+deadlines).properties(height=max(240,len(gantt)*28)),use_container_width=True)
             st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
             st.dataframe(gantt.drop(columns=["Row","Deadline"]),hide_index=True,use_container_width=True)
+    with sequence_tab:
+        st.subheader("RS → GIS → PLS sequence analysis")
+        st.caption("Advisory only: findings use explicit manager allocations and never move work or change project health.")
+        findings=sequence_analysis(weeks)
+        if findings.empty: st.info("No material sequence review items were found in the selected planning period.")
+        else:
+            counts=findings.Category.value_counts(); cols=st.columns(4)
+            for col,label in zip(cols,["Gap","Possible overlap","Downstream starvation","Pull-forward opportunity"]): col.metric(label,int(counts.get(label,0)))
+            st.dataframe(findings,hide_index=True,use_container_width=True)
     with weekly:
         def show_department(d: str, editable: bool=False):
             st.subheader(d)
@@ -283,6 +295,52 @@ def planning_view() -> None:
                 if st.button("Save issue",disabled=not user):
                     try: update_issue(int(issue_id),user,owner=new_owner,required_by=new_due,resolution=resolution,status=new_status); refresh()
                     except ValueError as exc: st.error(str(exc))
+
+def resource_management_view() -> None:
+    st.header("Resource Management")
+    st.caption("Operational availability changes preserve each employee's home department and contracted hours.")
+    resources_tab,holidays_tab,adjustments_tab=st.tabs(["Resources / roster","Absence & Holidays","Temporary assignments"])
+    with resources_tab:
+        resources=get_resources(); editor=prepare_date_columns_for_editor(resources,RESOURCE_DATE_COLUMNS) if not resources.empty else pd.DataFrame(columns=["person_name","department","weekly_hours","active_status"])
+        edited=st.data_editor(editor,num_rows="dynamic",hide_index=True,use_container_width=True,key="operational_resources")
+        if st.button("Save resources",disabled=not user,key="save_operational_resources"): save_resources(edited.to_dict("records"),user); refresh()
+    with holidays_tab:
+        upload=st.file_uploader("Approved holiday snapshot",type=["csv","xlsx","xls"],key="operational_holidays")
+        if upload:
+            preview=preview_holiday_snapshot(upload); st.write({"New":len(preview["new"]),"Changed":len(preview["changed"]),"Removed/cancelled":len(preview["removed"]),"Unmatched":len(preview["unmatched"])})
+            if preview["unmatched"]: st.warning("Unmatched employees: "+", ".join(preview["unmatched"]))
+            if st.button("Apply holiday snapshot",type="primary"): apply_holiday_snapshot(preview,upload.name,user); refresh()
+        st.dataframe(get_holidays(),hide_index=True,use_container_width=True)
+    with adjustments_tab:
+        resources=get_resources(); adjustments=get_capacity_adjustments()
+        if not adjustments.empty:
+            display=adjustments[["id","person_name","home_department","weekly_hours","adjustment_type","destination_department","start_date","end_date","capacity_percent","hours_per_week","reason","active","period_status"]]
+            st.dataframe(display,hide_index=True,use_container_width=True)
+        else: st.info("No temporary capacity adjustments recorded.")
+        with st.expander("+ Add or edit temporary adjustment",expanded=False):
+            ids=[None]+(adjustments.id.astype(int).tolist() if not adjustments.empty else [])
+            edit_id=st.selectbox("Record",ids,format_func=lambda value:"Create new adjustment" if value is None else f"#{value} · "+adjustments.loc[adjustments.id==value,"person_name"].iloc[0])
+            current={} if edit_id is None else adjustments[adjustments.id==edit_id].iloc[0].to_dict()
+            resource_options={f"{r.person_name} · {r.department} · {r.weekly_hours:g} h":int(r.id) for r in resources.itertuples()}
+            selected_label=next((label for label,rid in resource_options.items() if rid==current.get("resource_id")),next(iter(resource_options),None))
+            with st.form("capacity_adjustment_form"):
+                resource_label=st.selectbox("Employee / home department",list(resource_options),index=list(resource_options).index(selected_label) if selected_label else 0)
+                c1,c2=st.columns(2); kind=c1.selectbox("Adjustment type",TEMPORARY_ADJUSTMENT_TYPES,index=TEMPORARY_ADJUSTMENT_TYPES.index(current.get("adjustment_type")) if current.get("adjustment_type") in TEMPORARY_ADJUSTMENT_TYPES else 0)
+                destination_options=["No destination",*DISCIPLINES]; destination_value=current.get("destination_department") or "No destination"; destination=c2.selectbox("Destination department (assignments only)",destination_options,index=destination_options.index(destination_value))
+                start=c1.date_input("Start date",_date_value(current.get("start_date"),date.today())); end=c2.date_input("End date",_date_value(current.get("end_date"),date.today()))
+                mode=st.radio("Capacity measure",["Percentage","Hours per week"],index=1 if current.get("hours_per_week") is not None and not pd.isna(current.get("hours_per_week")) else 0,horizontal=True)
+                amount=st.number_input("Capacity percentage" if mode=="Percentage" else "Hours per week",min_value=0.01,max_value=100.0 if mode=="Percentage" else None,value=float(current.get("capacity_percent") if mode=="Percentage" and pd.notna(current.get("capacity_percent")) else current.get("hours_per_week") if mode!="Percentage" and pd.notna(current.get("hours_per_week")) else 100 if mode=="Percentage" else 37.5))
+                reason=st.text_area("Reason / notes",str(current.get("reason") or "")); active=st.checkbox("Active",value=bool(current.get("active",True))); submit=st.form_submit_button("Save temporary adjustment",type="primary")
+            if submit:
+                try:
+                    save_capacity_adjustment({"id":edit_id,"resource_id":resource_options[resource_label],"adjustment_type":kind,"destination_department":None if destination=="No destination" else destination,"start_date":start,"end_date":end,"capacity_percent":amount if mode=="Percentage" else None,"hours_per_week":amount if mode!="Percentage" else None,"reason":reason,"active":active},user); refresh()
+                except ValueError as exc: st.error(str(exc))
+
+
+def _date_value(value, default):
+    parsed=pd.to_datetime(value,errors="coerce")
+    return default if pd.isna(parsed) else parsed.date()
+
 
 def administration_view() -> None:
     st.header("Administration")
@@ -394,5 +452,6 @@ tabs = st.tabs(labels)
 with tabs[0]: project_view()
 with tabs[1]: planning_view()
 with tabs[2]: principles_view()
+with tabs[3]: resource_management_view()
 if st.session_state.role == "admin":
-    with tabs[3]: administration_view()
+    with tabs[4]: administration_view()

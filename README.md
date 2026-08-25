@@ -28,9 +28,18 @@ Processing managers select RS, GIS or PLS and see:
 
 A plan cannot allocate more than the project's remaining forecast. A planning review with unplanned hours cannot be completed unless an open escalation exists for the department.
 
-### Administration
+### Resource management and administration
 
-Roster maintenance is hidden in the sidebar Administration panel. It is separated from operational planning so PM and processing-manager workflows remain focused.
+Managers and administrators can maintain the roster, approved absence, and temporary
+capacity adjustments in Resource Management. Temporary assignments move available
+capacity between departments for their date range without changing the employee's
+home roster record; unavailable adjustments reduce operational capacity. Technical
+setup transfer, imports, internal-activity administration, and the audit viewer remain
+in the administrator-only Administration area.
+
+Planning includes an advisory Sequence view for material RS → GIS and GIS → PLS
+gaps, possible overlaps, downstream starvation, and pull-forward opportunities based
+on explicit manager allocations. It does not move allocations automatically.
 
 ## Honest-data rules
 
@@ -80,7 +89,9 @@ PLANNER_USERS_JSON=<JSON>
 }
 ```
 
-Roles are `admin` and `manager`. Both can use Projects and Planning; only admins receive the Administration tab. Set optional `active` to `false` to deny login.
+Roles are `admin` and `manager`. Both can use Projects, Planning, and operational
+Resource Management; only admins receive the technical Administration tab. Set
+optional `active` to `false` to deny login.
 
 ### Persistent Disk
 
