@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from html.parser import HTMLParser
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +15,7 @@ from app.data.db import connect, execute, rows
 from app.services.planning import capacity_status, spread_hours, week_starts
 
 DISCIPLINES = ["RS", "GIS", "PLS"]
+PROJECT_HEALTH_TOLERANCE_HOURS = 0.5
 LOADING_TYPES = ["even", "front_loaded", "back_loaded", "manual"]
 RESOURCE_STATUSES = [
     "active",
@@ -255,6 +257,35 @@ def ensure_mvp_schema() -> None:
         }.items():
             if column not in holiday_columns:
                 conn.execute(f"ALTER TABLE holidays ADD COLUMN {column} {definition}")
+        escalation_columns = {r[1] for r in conn.execute("PRAGMA table_info(planning_escalations)")}
+        for column, definition in {
+            "created_by": "TEXT", "updated_at": "TEXT", "resolved_at": "TEXT",
+            "resolved_by": "TEXT", "resolution": "TEXT",
+        }.items():
+            if column not in escalation_columns:
+                conn.execute(f"ALTER TABLE planning_escalations ADD COLUMN {column} {definition}")
+        audit_columns = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)")}
+        for column, definition in {
+            "project_code": "TEXT", "department": "TEXT", "field_name": "TEXT",
+            "details": "TEXT",
+        }.items():
+            if column not in audit_columns:
+                conn.execute(f"ALTER TABLE audit_log ADD COLUMN {column} {definition}")
+
+
+def _audit(conn, user: str, action: str, entity_type: str, entity_id=None, *,
+           project_code=None, department=None, field_name=None, old=None, new=None,
+           details=None) -> None:
+    """Append one human-readable audit event; audit rows are never mutated."""
+    conn.execute(
+        """INSERT INTO audit_log(timestamp,user_name,object_type,object_id,action,
+           previous_value,new_value,reason,project_code,department,field_name,details)
+           VALUES (CURRENT_TIMESTAMP,?,?,?,?,?,?,?,?,?,?,?)""",
+        (user, entity_type, entity_id, action,
+         json.dumps(old, default=str) if old is not None else None,
+         json.dumps(new, default=str) if new is not None else None, details,
+         project_code, department, field_name, details),
+    )
 
 
 
@@ -407,7 +438,7 @@ def load_projects_csv(path: str | Path = "sample-data/projects.csv") -> pd.DataF
     return out[PROJECT_FIELDS]
 
 
-def save_projects(records: Iterable[dict]) -> None:
+def save_projects(records: Iterable[dict], user: str = "System") -> None:
     ensure_mvp_schema()
     with connect() as conn:
         for r in records:
@@ -417,6 +448,7 @@ def save_projects(records: Iterable[dict]) -> None:
 
             if not code or not name:
                 continue
+            previous_row = conn.execute("SELECT * FROM mvp_projects WHERE project_code=?", (original_code,)).fetchone()
 
             if original_code != code:
                 if conn.execute(
@@ -520,6 +552,14 @@ def save_projects(records: Iterable[dict]) -> None:
                     vals.get("assumptions"),
                 ),
             )
+            current = dict(conn.execute("SELECT * FROM mvp_projects WHERE project_code=?", (code,)).fetchone())
+            previous = dict(previous_row) if previous_row else None
+            if previous is None:
+                _audit(conn,user,"Project created","Project",current["id"],project_code=code,new=current,details=f"Created {code} · {name}")
+            else:
+                changed=[k for k in PROJECT_FIELDS if str(previous.get(k) or "") != str(current.get(k) or "")]
+                if changed:
+                    _audit(conn,user,"Project edited","Project",current["id"],project_code=code,old={k:previous.get(k) for k in changed},new={k:current.get(k) for k in changed},details="Changed: "+", ".join(changed))
         increment_data_version(conn)
 
 
@@ -635,12 +675,20 @@ def save_manager_plan(frame: pd.DataFrame, weeks: list[date], department: str, u
             if round(sum(values), 2) > round(remaining, 2):
                 raise ValueError(f"{code} plans more hours than its {remaining:.1f} remaining hours.")
             for week, hours in zip(weeks, values):
+                prior = conn.execute("SELECT planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=? AND week_start=?",
+                                     (code, department, week.isoformat())).fetchone()
+                old = float(prior["planned_hours"]) if prior else 0.0
+                if abs(old - hours) <= 0.005:
+                    continue
                 conn.execute(
                     """INSERT INTO manager_weekly_plan(project_code,department,week_start,planned_hours,updated_by)
                        VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
                        planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
                     (code, department, week.isoformat(), hours, user),
                 )
+                _audit(conn, user, "Allocation updated", "Weekly allocation", code,
+                       project_code=code, department=department, field_name=week.isoformat(),
+                       old=old, new=hours, details=f"{week.isoformat()}: {old:g} h → {hours:g} h")
         increment_data_version(conn)
 
 
@@ -696,15 +744,22 @@ def apply_quick_allocation(project_code: str, department: str, weeks: list[date]
                             VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
                             planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
                          (project_code, department, week.isoformat(), round(hours, 2), user))
+            if abs(old - hours) > 0.005:
+                _audit(conn, user, "Quick Allocation", "Weekly allocation", project_code,
+                       project_code=project_code, department=department, field_name=week.isoformat(),
+                       old=old, new=round(hours, 2), details=f"{operation.title()} · {week.isoformat()}: {old:g} h → {hours:g} h")
         increment_data_version(conn)
 
 
 def clear_future_allocation(project_code: str, department: str, from_week: date, user: str) -> int:
     from_week = from_week - timedelta(days=from_week.weekday())
     with connect() as conn:
+        old = [dict(r) for r in conn.execute("SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0", (project_code,department,from_week.isoformat()))]
         cur = conn.execute("UPDATE manager_weekly_plan SET planned_hours=0,updated_by=?,updated_at=CURRENT_TIMESTAMP "
                            "WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0",
                            (user, project_code, department, from_week.isoformat()))
+        if old:
+            _audit(conn,user,"Future allocation cleared","Weekly allocation",project_code,project_code=project_code,department=department,old=old,new=[],details=f"Cleared {len(old)} weeks from {from_week.isoformat()} ({sum(r['planned_hours'] for r in old):g} h)")
         increment_data_version(conn)
         return cur.rowcount
 
@@ -734,6 +789,8 @@ def move_allocation(project_code: str, department: str, offset_weeks: int, plann
                             VALUES (?,?,?,?,?) ON CONFLICT(project_code,department,week_start) DO UPDATE SET
                             planned_hours=excluded.planned_hours,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
                          (project_code, department, target, round(hours, 2), user))
+        if source:
+            _audit(conn,user,"Allocation moved","Weekly allocation",project_code,project_code=project_code,department=department,old=[dict(r) for r in source],new=moved,details=f"Moved {sum(moved.values()):g} h by {offset_weeks} weeks")
         increment_data_version(conn)
         return {"moved_hours": round(sum(moved.values()), 2), "outside_hours": 0.0, "rows": len(moved)}
 
@@ -756,19 +813,56 @@ def monthly_allocation_matrix(start: date, end: date, department: str | None = N
 
 
 def create_escalation(project_code: str, department: str, issue_type: str, impact_hours: float,
-                      decision_required: str, owner: str, required_by: date) -> int:
+                      decision_required: str, owner: str, required_by: date, user: str = "") -> int:
     ensure_mvp_schema()
     if not decision_required.strip() or not owner.strip():
         raise ValueError("Decision required and owner are mandatory.")
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO planning_escalations(project_code,department,issue_type,impact_hours,
-               decision_required,owner,required_by) VALUES (?,?,?,?,?,?,?)""",
+               decision_required,owner,required_by,created_by,updated_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
             (project_code or None, department, issue_type, float(impact_hours), decision_required.strip(),
-             owner.strip(), required_by.isoformat()),
+             owner.strip(), required_by.isoformat(), user or None),
         )
+        _audit(conn, user, "Issue created", "Issue", cur.lastrowid, project_code=project_code,
+               department=department, new={"owner": owner, "required_by": required_by.isoformat()},
+               details=f"{issue_type}: {decision_required.strip()}")
         increment_data_version(conn)
         return int(cur.lastrowid)
+
+
+def get_issues(status: str = "Open", department: str = "All", project_code: str = "All",
+               owner: str = "All", issue_type: str = "All") -> pd.DataFrame:
+    ensure_mvp_schema(); clauses=[]; params=[]
+    for column, value in [("status", status), ("department", department), ("project_code", project_code),
+                          ("owner", owner), ("issue_type", issue_type)]:
+        if value and value != "All": clauses.append(f"{column}=?"); params.append(value)
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    return pd.DataFrame(rows(f"SELECT * FROM planning_escalations {where} ORDER BY CASE status WHEN 'Open' THEN 0 ELSE 1 END,required_by,created_at DESC", params))
+
+
+def update_issue(issue_id: int, user: str, *, owner: str | None = None,
+                 required_by: date | str | None = None, resolution: str | None = None,
+                 status: str | None = None) -> None:
+    ensure_mvp_schema()
+    with connect() as conn:
+        old = conn.execute("SELECT * FROM planning_escalations WHERE id=?", (issue_id,)).fetchone()
+        if not old: raise ValueError("Issue not found.")
+        new_status = status or old["status"]
+        if new_status == "Closed" and not str(resolution if resolution is not None else old["resolution"] or "").strip():
+            raise ValueError("A resolution is required to close an issue.")
+        values = {"owner": owner if owner is not None else old["owner"],
+                  "required_by": normalise_date_for_db(required_by) if required_by is not None else old["required_by"],
+                  "resolution": resolution if resolution is not None else old["resolution"], "status": new_status}
+        conn.execute("""UPDATE planning_escalations SET owner=?,required_by=?,resolution=?,status=?,updated_at=CURRENT_TIMESTAMP,
+                     resolved_at=CASE WHEN ?='Closed' THEN COALESCE(resolved_at,CURRENT_TIMESTAMP) ELSE NULL END,
+                     resolved_by=CASE WHEN ?='Closed' THEN ? ELSE NULL END WHERE id=?""",
+                     (values["owner"],values["required_by"],values["resolution"],new_status,new_status,new_status,user,issue_id))
+        for field in ("owner","required_by","resolution","status"):
+            if str(old[field] or "") != str(values[field] or ""):
+                action = "Issue closed" if field == "status" and new_status == "Closed" else "Issue reopened" if field == "status" else f"Issue {field.replace('_',' ')} changed"
+                _audit(conn,user,action,"Issue",issue_id,project_code=old["project_code"],department=old["department"],field_name=field,old=old[field],new=values[field],details=f"{field.replace('_',' ').title()}: {old[field] or '—'} → {values[field] or '—'}")
+        increment_data_version(conn)
 
 
 def complete_planning_review(frame: pd.DataFrame, department: str, start: date, end: date, user: str) -> int:
@@ -909,6 +1003,10 @@ def import_sample_roster(path: str | Path | Any = "sample-data/roster.csv") -> M
 
 
 def _parse_date(value: Any) -> date | None:
+    # ISO database dates are unambiguous and must not be reinterpreted as
+    # day-first (for example 2026-09-10 becoming 9 October).
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value.strip()):
+        return date.fromisoformat(value.strip())
     parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
     return None if pd.isna(parsed) else parsed.date()
 
@@ -1038,6 +1136,9 @@ def apply_holiday_snapshot(preview: dict[str, Any], filename: str, user: str) ->
                 conn.execute("INSERT INTO holidays(resource_id,person_name,employee_id,holiday_date,hours,source,notes,status,import_id) VALUES (?,?,?,?,?,'hr-approved',?,'active',?)",
                              (record["resource_id"], record["person_name"], record["employee_id"], record["holiday_date"], record["hours"], record["notes"], import_id))
         result.imported_holiday_records_count = len(preview["records"])
+        _audit(conn,user,"Holiday snapshot imported","Holiday import",import_id,
+               new={"records":len(preview["records"]),"new":len(preview["new"]),"changed":len(preview["changed"]),"cancelled":len(preview["removed"]),"unmatched":len(preview["unmatched"])},
+               details=f"{len(preview['records'])} records · {len(preview['new'])} new · {len(preview['changed'])} changed · {len(preview['removed'])} cancelled · {len(preview['unmatched'])} unmatched")
         increment_data_version(conn)
     recalculate_holiday_totals()
     return result
@@ -1079,7 +1180,7 @@ def save_holidays(records: Iterable[dict]) -> None:
     recalculate_holiday_totals()
     increment_data_version()
 
-def save_resources(records: Iterable[dict]) -> None:
+def save_resources(records: Iterable[dict], user: str = "System") -> None:
     ensure_mvp_schema()
     with connect() as conn:
         for r in records:
@@ -1090,6 +1191,7 @@ def save_resources(records: Iterable[dict]) -> None:
                 continue
 
             status = str(r.get("active_status") or "active").lower()
+            old = conn.execute("SELECT * FROM mvp_resources WHERE person_name=?", (name,)).fetchone()
 
             conn.execute(
                 """
@@ -1129,6 +1231,10 @@ def save_resources(records: Iterable[dict]) -> None:
                     normalise_date_for_db(r.get("status_end_date")),
                 ),
             )
+            current=conn.execute("SELECT * FROM mvp_resources WHERE person_name=?",(name,)).fetchone()
+            changed = not old or any(str(old[k] or "") != str(current[k] or "") for k in RESOURCE_FIELDS)
+            if changed:
+                _audit(conn,user,"Resource created" if not old else "Resource updated","Resource",current["id"],department=dept,old=dict(old) if old else None,new=dict(current),details=f"{'Created' if not old else 'Updated'} {name}")
         increment_data_version(conn)
 
 
@@ -1440,7 +1546,7 @@ def summary_rows_from_capacity_balance(bal: pd.DataFrame, week_cols: list[str]) 
     return pd.DataFrame(summary)
 
 
-def save_internal_activities(records: Iterable[dict]) -> None:
+def save_internal_activities(records: Iterable[dict], user: str = "System") -> None:
     ensure_mvp_schema()
     with connect() as conn:
         for record in records:
@@ -1450,10 +1556,14 @@ def save_internal_activities(records: Iterable[dict]) -> None:
             values = (record["activity_name"], record["department"], start, end,
                       max(float(record.get("planned_hours_per_week") or 0), 0), int(bool(record.get("active", True))), record.get("notes"))
             if record.get("id"):
+                old=conn.execute("SELECT * FROM internal_activities WHERE id=?",(int(record["id"]),)).fetchone()
                 conn.execute("UPDATE internal_activities SET activity_name=?,department=?,start_week=?,end_week=?,planned_hours_per_week=?,active=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                              (*values, int(record["id"])))
+                if old and any(str(old[k] or "") != str(v or "") for k,v in zip(("activity_name","department","start_week","end_week","planned_hours_per_week","active","notes"),values)):
+                    _audit(conn,user,"Internal activity updated","Internal activity",record["id"],department=record["department"],old=dict(old),new=dict(record),details=f"Updated {record['activity_name']}")
             else:
-                conn.execute("INSERT INTO internal_activities(activity_name,department,start_week,end_week,planned_hours_per_week,active,notes) VALUES (?,?,?,?,?,?,?)", values)
+                cur=conn.execute("INSERT INTO internal_activities(activity_name,department,start_week,end_week,planned_hours_per_week,active,notes) VALUES (?,?,?,?,?,?,?)", values)
+                _audit(conn,user,"Internal activity created","Internal activity",cur.lastrowid,department=record["department"],new=dict(record),details=f"Created {record['activity_name']}")
         increment_data_version(conn)
 
 
@@ -1483,6 +1593,44 @@ def manager_allocations(weeks: list[date]) -> pd.DataFrame:
                              (weeks[0].isoformat(), weeks[-1].isoformat())))
 
 
+def project_health(remaining_hours: float, allocated_before_deadline: float,
+                   tolerance: float = PROJECT_HEALTH_TOLERANCE_HOURS) -> str:
+    """Classify delivery coverage, independently of departmental capacity."""
+    remaining = max(float(remaining_hours or 0), 0)
+    allocated = max(float(allocated_before_deadline or 0), 0)
+    if remaining > tolerance and allocated <= tolerance:
+        return "Unplanned"
+    difference = allocated - remaining
+    if difference < -tolerance:
+        return "Under-resourced"
+    if difference > tolerance:
+        return "Over-resourced"
+    return "Well-resourced"
+
+
+def project_health_plans(as_of: date | None = None, department: str | None = None) -> pd.DataFrame:
+    """Derive one explainable status per active project/discipline in bulk."""
+    as_of = as_of or date.today()
+    projects = get_projects(False)
+    allocations = pd.DataFrame(rows("SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan WHERE planned_hours>0 AND week_start>=?", (as_of.isoformat(),)))
+    output=[]
+    for p in projects.to_dict("records"):
+        for disc in ([department] if department and department != "All" else DISCIPLINES):
+            remaining=max(float(p.get(f"{disc.lower()}_hours") or 0)-float(p.get(f"actual_{disc.lower()}_hours") or 0),0)
+            if remaining <= 0: continue
+            sub=allocations[(allocations.project_code==p["project_code"]) & (allocations.department==disc)] if not allocations.empty else pd.DataFrame()
+            deadline=str(p.get("end_date") or "")
+            before=sub[sub.week_start <= deadline] if not sub.empty else sub
+            allocated=float(before.planned_hours.sum()) if not before.empty else 0.0
+            first=str(sub.week_start.min()) if not sub.empty else None; last=str(sub.week_start.max()) if not sub.empty else None
+            output.append({"Project Code":p["project_code"],"Project":p["project_name"],"Department":disc,
+                           "Health":project_health(remaining,allocated),"Remaining Hours":round(remaining,2),
+                           "Allocated before deadline":round(allocated,2),"Shortfall / surplus":round(allocated-remaining,2),
+                           "Required By":deadline,"Data Available":p.get(f"{disc.lower()}_start_date"),
+                           "First planned week":first,"Last planned week":last})
+    return pd.DataFrame(output)
+
+
 def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.DataFrame:
     """Timeline periods derived first from explicit manager allocation, with labelled baseline fallback."""
     projects = get_projects(False); allocations = manager_allocations(weeks); out=[]
@@ -1500,13 +1648,22 @@ def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.
                 start = _parse_date(p.get(f"{disc.lower()}_start_date") or p.get("start_date")); end = _parse_date(p.get("end_date")); allocated = 0.0
             if not start or not end or end < weeks[0] or start > weeks[-1] + timedelta(days=6): continue
             remaining = max(float(p.get(f"{disc.lower()}_hours") or 0) - float(p.get(f"actual_{disc.lower()}_hours") or 0), 0)
+            deadline_allocated = float(sub[sub.week_start <= str(p.get("end_date"))].planned_hours.sum()) if not sub.empty else 0.0
+            health = project_health(remaining, deadline_allocated)
             out.append({"Project": project_timeline_label(p), "project_code": p["project_code"], "Discipline": disc,
                         "Start": max(start, weeks[0]), "End": min(end, weeks[-1] + timedelta(days=6)),
                         "Plan source": "Manager allocation" if explicit else "Forecast baseline",
                         "Remaining hours": remaining, "Allocated hours": allocated,
                         "Unplanned hours": max(remaining - allocated, 0), "Data available": p.get(f"{disc.lower()}_start_date"),
-                        "Required by": p.get("end_date")})
-    return pd.DataFrame(out)
+                        "Required by": p.get("end_date"), "Health status": health,
+                        "Shortfall / surplus": round(deadline_allocated-remaining,2),
+                        "Late": bool(explicit and end > _parse_date(p.get("end_date")))})
+    result=pd.DataFrame(out)
+    if not result.empty:
+        priority={r.project_code:r.priority for r in projects.itertuples()}
+        result["_priority"]=result.project_code.map(priority); result["_disc"]=result.Discipline.map({"RS":0,"GIS":1,"PLS":2})
+        result=result.sort_values(["_priority","Required by","project_code","_disc"]).drop(columns=["_priority","_disc"])
+    return result
 
 def capacity_balance(weeks: list[date]) -> pd.DataFrame:
     grid = pd.DataFrame(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import pandas as pd
+import altair as alt
 import streamlit as st
 
 from app.data.db import initialize_database, rows
@@ -11,9 +12,9 @@ from app.services.mvp import (
     ensure_mvp_schema, get_holidays, get_internal_activities, get_projects, get_resources,
     import_sample_roster, internal_activity_by_week, load_roster_csv, manager_plan,
     monthly_allocation_matrix, move_allocation, prepare_date_columns_for_editor,
-    preview_holiday_snapshot, project_remaining_hours, quick_allocation_values,
+    preview_holiday_snapshot, project_remaining_hours, project_health_plans, quick_allocation_values,
     save_internal_activities, save_manager_plan, save_projects, save_resources,
-    validate_project_demand, week_starts, weekly_department_capacity,
+    validate_project_demand, week_starts, weekly_department_capacity, get_issues, update_issue,
 )
 
 st.set_page_config(page_title="Production Capacity Planner", layout="wide")
@@ -131,7 +132,7 @@ def project_view() -> None:
         errors=validate_project_demand(record)
         if errors:
             for error in errors: st.error(error)
-        else: save_projects([record]); st.success("Project demand saved."); refresh()
+        else: save_projects([record], user.strip()); st.success("Project demand saved."); refresh()
     st.subheader("Demand register")
     register=get_projects(False)
     st.dataframe(register[["priority","project_code","project_name","client","project_manager","spus","row_km","cct_km","rs_hours","gis_hours","pls_hours","end_date","status"]] if not register.empty else register,hide_index=True,use_container_width=True)
@@ -141,68 +142,90 @@ def planning_view() -> None:
     st.header("Planning")
     if not weeks: st.error("Planning end must not be before planning start."); return
     department=st.segmented_control("Department",["All",*DISCIPLINES],default="All")
-    overview,timeline,weekly=st.tabs(["Overview","Timeline","Weekly allocation"])
+    overview,gantt_tab,weekly,issues_tab=st.tabs(["Overview","Gantt","Weekly allocation","Issues"])
     bal=capacity_balance(weeks); selected=bal if department=="All" else bal[bal.department==department]
+    health=project_health_plans(planning_start,department)
     with overview:
-        remaining=unplanned=0.0
-        for d in (DISCIPLINES if department=="All" else [department]):
-            plan=manager_plan(weeks,d)
-            if not plan.empty: remaining+=float(plan["Remaining Hours"].sum()); unplanned+=float(plan["Unplanned Hours"].sum())
-        c1,c2,c3,c4=st.columns(4); c1.metric("Remaining demand",f"{remaining:,.1f} h"); c2.metric("Unplanned demand",f"{unplanned:,.1f} h"); c3.metric("Available capacity",f"{selected.available_capacity.sum():,.1f} h"); c4.metric("Capacity balance",f"{selected.over_under_capacity.sum():,.1f} h")
-        grain=st.radio("Aggregation",["Weekly","Monthly"],horizontal=True)
-        chart=selected.groupby("week_start",as_index=False)[["available_capacity","allocated_demand","internal_hours","total_allocated","over_under_capacity"]].sum(); chart["week_start"]=pd.to_datetime(chart.week_start)
-        if grain=="Monthly": chart=chart.set_index("week_start").resample("MS").sum().reset_index()
-        st.line_chart(chart.set_index("week_start")[["available_capacity","total_allocated","over_under_capacity"]])
-        st.caption("Available capacity = contracted roster − active absence. Total allocated = project allocation + internal activities.")
-        matrix=monthly_allocation_matrix(planning_start,planning_end,department)
-        months=[c for c in matrix.columns if c!="Project"]
-        totals={m:float(matrix[m].sum()) if not matrix.empty else 0 for m in months}
-        cap_month=selected.assign(Month=pd.to_datetime(selected.week_start).dt.strftime("%b %Y")).groupby("Month").available_capacity.sum().to_dict()
-        footer=pd.DataFrame([{"Project":"Allocated",**totals},{"Project":"Capacity",**{m:cap_month.get(m,0) for m in months}},{"Project":"Balance",**{m:cap_month.get(m,0)-totals[m] for m in months}}])
-        st.subheader("Monthly project matrix"); st.dataframe(pd.concat([matrix,footer],ignore_index=True),hide_index=True,use_container_width=True)
-    with timeline:
+        remaining=float(health["Remaining Hours"].sum()) if not health.empty else 0
+        unplanned=float(health.loc[health.Health=="Unplanned","Remaining Hours"].sum()) if not health.empty else 0
+        shortage=selected[selected.over_under_capacity<0]
+        open_issues=len(get_issues("Open",department))
+        metrics=st.columns(6)
+        metrics[0].metric("Remaining demand",f"{remaining:,.1f} h"); metrics[1].metric("Unplanned demand",f"{unplanned:,.1f} h")
+        metrics[2].metric("Unallocated capacity in period",f"{max(float(selected.over_under_capacity.sum()),0):,.1f} h")
+        metrics[3].metric("Weeks over capacity",str(len(shortage))); metrics[4].metric("Peak weekly shortage",f"{abs(float(shortage.over_under_capacity.min())) if not shortage.empty else 0:,.1f} h")
+        metrics[5].metric("Open issues",str(open_issues))
+        if not shortage.empty: st.caption("Earliest capacity gap: "+str(shortage.sort_values("week_start").iloc[0].week_start))
+        st.subheader("Project-discipline plan health")
+        counts=health.Health.value_counts() if not health.empty else pd.Series(dtype=int)
+        cols=st.columns(4)
+        for col,label in zip(cols,["Unplanned","Under-resourced","Well-resourced","Over-resourced"]): col.metric(label,int(counts.get(label,0)))
+        chart=selected.groupby("week_start",as_index=False)[["available_capacity","total_allocated","over_under_capacity"]].sum(); chart["week_start"]=pd.to_datetime(chart.week_start)
+        st.line_chart(chart.set_index("week_start")); st.caption("Available capacity = contracted roster − absence. Balance = available capacity − project allocations − internal activities.")
+        if not health.empty: st.dataframe(health,hide_index=True,use_container_width=True)
+    with gantt_tab:
         gantt=allocation_timeline(weeks,department)
         if gantt.empty: st.info("No allocation or forecast baseline in this range.")
         else:
-            gantt["Duration (days)"]=(pd.to_datetime(gantt["End"])-pd.to_datetime(gantt["Start"])).dt.days+1
-            st.bar_chart(gantt,x="Project",y="Duration (days)",color="Plan source",horizontal=True)
-            st.dataframe(gantt.drop(columns="Duration (days)"),hide_index=True,use_container_width=True)
+            gantt["Row"]=gantt["Project"]+"  ·  "+gantt["Discipline"]; gantt["Start"]=pd.to_datetime(gantt.Start); gantt["End"]=pd.to_datetime(gantt.End); gantt["Deadline"]=pd.to_datetime(gantt["Required by"])
+            order=gantt["Row"].drop_duplicates().tolist()
+            tips=["Project","project_code","Discipline","Start:T","End:T","Plan source","Remaining hours:Q","Allocated hours:Q","Required by:T","Health status","Shortfall / surplus:Q"]
+            bars=alt.Chart(gantt).mark_bar(cornerRadius=2).encode(x=alt.X("Start:T",scale=alt.Scale(domain=[planning_start,planning_end+timedelta(days=6)]),title="Calendar date"),x2="End:T",y=alt.Y("Row:N",sort=order,title="Project / department"),color=alt.Color("Discipline:N",scale=alt.Scale(domain=DISCIPLINES,range=["#72a5d3","#76b77b","#c9ad6a"])),opacity=alt.Opacity("Plan source:N",scale=alt.Scale(domain=["Manager allocation","Forecast baseline"],range=[1,.28])),tooltip=tips)
+            deadlines=alt.Chart(gantt).mark_tick(color="#b23a48",thickness=2,size=18).encode(x="Deadline:T",y=alt.Y("Row:N",sort=order),tooltip=["Project","Required by:T","Late"])
+            st.altair_chart((bars+deadlines).properties(height=max(240,len(gantt)*28)),use_container_width=True)
+            st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
+            st.dataframe(gantt.drop(columns=["Row","Deadline"]),hide_index=True,use_container_width=True)
     with weekly:
-        if department=="All": st.info("Select RS, GIS or PLS to allocate and fine-tune weekly cells.")
-        else:
-            if st.button("+ Allocate capacity",type="primary"): allocation_dialog(department)
-            ops=st.expander("Clear / move allocation")
-            projects=get_projects(False); codes=projects.project_code.tolist() if not projects.empty else []
-            if codes:
-                code=ops.selectbox("Project",codes,key="ops_project"); from_week=ops.selectbox("From week",weeks,key="clear_week")
-                if ops.button("Clear future allocation",disabled=not user.strip()): clear_future_allocation(code,department,from_week,user.strip()); refresh()
-                offset=ops.number_input("Move by N weeks",-52,52,2)
-                if ops.button("Move allocation",disabled=not user.strip()):
-                    result=move_allocation(code,department,int(offset),planning_start,planning_end,user.strip())
-                    if result["outside_hours"]: ops.warning(f"Move not applied: {result['outside_hours']} h would leave the planning range.")
-                    else: refresh()
-            plan=manager_plan(weeks,department)
-            if plan.empty: st.info("No active demand for this department.")
-            else:
-                week_cols=[w.isoformat() for w in weeks]; disabled=[c for c in plan.columns if c not in week_cols]
-                edited=st.data_editor(plan,hide_index=True,use_container_width=True,disabled=disabled,column_config={w:st.column_config.NumberColumn(w,min_value=0.0) for w in week_cols})
-                edited["Unplanned Hours"]=(edited["Remaining Hours"]-edited[week_cols].sum(axis=1)).clip(lower=0).round(2)
-                if st.button("Save manager plan",disabled=not user.strip()):
-                    try: save_manager_plan(edited,weeks,department,user.strip()); refresh()
+        def show_department(d: str, editable: bool=False):
+            st.subheader(d)
+            plan=manager_plan(weeks,d); week_cols=[w.isoformat() for w in weeks]
+            if plan.empty: st.info(f"No active {d} demand."); return
+            h=project_health_plans(planning_start,d)[["Project Code","Health"]]
+            plan=h.merge(plan,on="Project Code",how="right"); display=plan[["Health","Project Code","Project","Remaining Hours",*week_cols]]
+            if editable:
+                if st.button("+ Allocate capacity",type="primary",key=f"allocate_{d}"): allocation_dialog(d)
+                disabled=[c for c in plan.columns if c not in week_cols]
+                edited=st.data_editor(plan,hide_index=True,use_container_width=True,disabled=disabled,column_config={w:st.column_config.NumberColumn(w,min_value=0.) for w in week_cols},key=f"plan_{d}")
+                if st.button("Save manager plan",disabled=not user.strip(),key=f"save_{d}"):
+                    try: save_manager_plan(edited,weeks,d,user.strip()); refresh()
                     except ValueError as exc: st.error(str(exc))
-                internal=internal_activity_by_week(weeks); st.caption("Internal/non-project activity consuming weekly capacity")
-                st.dataframe(internal[internal.department==department],hide_index=True,use_container_width=True)
-                with st.expander("Escalate an unresolved issue"):
-                    with st.form("escalation"):
-                        esc=st.selectbox("Project",plan["Project Code"]); issue=st.selectbox("Issue type",["Capacity shortage","Data delay","Priority conflict","Skills gap"]); impact=st.number_input("Impact hours",0.0); decision=st.text_area("Decision required *"); owner=st.text_input("Owner *"); due=st.date_input("Required by",date.today()); submit=st.form_submit_button("Create escalation")
-                    if submit:
-                        try: create_escalation(esc,department,issue,impact,decision,owner,due); st.success("Escalation created.")
-                        except ValueError as exc: st.error(str(exc))
-
+            else: st.dataframe(display,hide_index=True,use_container_width=True)
+            d_bal=bal[bal.department==d].set_index("week_start")
+            totals=pd.DataFrame([{ "Summary":f"{d} Allocated",**{w:float(d_bal.loc[w,"allocated_demand"]) for w in week_cols}}, {"Summary":f"{d} Capacity",**{w:float(d_bal.loc[w,"available_capacity"]) for w in week_cols}}, {"Summary":f"{d} Balance",**{w:float(d_bal.loc[w,"over_under_capacity"]) for w in week_cols}}])
+            st.dataframe(totals,hide_index=True,use_container_width=True)
+            activities=get_internal_activities(); activities=activities[(activities.department==d)&(activities.active.astype(bool))] if not activities.empty else activities
+            if not activities.empty:
+                internal=[]
+                for a in activities.itertuples(): internal.append({"Internal activity":a.activity_name,**{w:(a.planned_hours_per_week if a.start_week<=w<=a.end_week else 0) for w in week_cols}})
+                st.caption("INTERNAL — included in Balance, but stored separately from projects"); st.dataframe(pd.DataFrame(internal),hide_index=True,use_container_width=True)
+        if department=="All":
+            st.caption("Portfolio scan view. Select a department above for precise editing and Quick Allocation.")
+            for d in DISCIPLINES: show_department(d)
+        else: show_department(department,True)
+    with issues_tab:
+        st.subheader("Issues register")
+        all_issues=get_issues("All",department); f1,f2,f3=st.columns(3)
+        status=f1.selectbox("Status",["Open","Closed","All"]); owners=["All"]+(sorted(all_issues.owner.dropna().unique()) if not all_issues.empty else []); owner=f2.selectbox("Owner",owners); types=["All"]+(sorted(all_issues.issue_type.dropna().unique()) if not all_issues.empty else []); kind=f3.selectbox("Issue type",types)
+        issue_data=get_issues(status,department,owner=owner,issue_type=kind)
+        st.dataframe(issue_data,hide_index=True,use_container_width=True)
+        with st.expander("+ Create issue"):
+            projects=get_projects(False); codes=projects.project_code.tolist() if not projects.empty else []
+            with st.form("create_issue"):
+                c1,c2=st.columns(2); code=c1.selectbox("Project",codes); dept=c2.selectbox("Department",DISCIPLINES,index=DISCIPLINES.index(department) if department in DISCIPLINES else 0); kind=st.selectbox("Issue type",["Capacity shortage","Data delay","Priority conflict","Skills gap"]); impact=st.number_input("Impact hours",0.); decision=st.text_area("Decision required"); owner_new=st.text_input("Owner"); due=st.date_input("Required by",date.today()); submit=st.form_submit_button("Create issue",disabled=not user.strip())
+            if submit:
+                try: create_escalation(code,dept,kind,impact,decision,owner_new,due,user.strip()); refresh()
+                except ValueError as exc: st.error(str(exc))
+        if not issue_data.empty:
+            with st.expander("Update / close / reopen issue"):
+                issue_id=st.selectbox("Issue",issue_data.id.tolist(),format_func=lambda i:f"#{i} · "+str(issue_data.loc[issue_data.id==i,"decision_required"].iloc[0])[:70]); current=issue_data[issue_data.id==issue_id].iloc[0]
+                new_owner=st.text_input("Owner",str(current.owner)); new_due=st.date_input("Required by",pd.to_datetime(current.required_by).date()); resolution=st.text_area("Resolution / outcome",str(current.resolution or "")); new_status=st.radio("Status",["Open","Closed"],index=0 if current.status=="Open" else 1,horizontal=True)
+                if st.button("Save issue",disabled=not user.strip()):
+                    try: update_issue(int(issue_id),user.strip(),owner=new_owner,required_by=new_due,resolution=resolution,status=new_status); refresh()
+                    except ValueError as exc: st.error(str(exc))
 
 def administration_view() -> None:
     st.header("Administration")
-    resources_tab,holidays_tab,internal_tab,imports_tab=st.tabs(["Resources","Absence & Holidays","Internal Activities","Imports"])
+    resources_tab,holidays_tab,internal_tab,imports_tab,audit_tab=st.tabs(["Resources","Absence & Holidays","Internal Activities","Imports","Audit log"])
     with resources_tab:
         upload=st.file_uploader("Roster CSV / Excel",type=["csv","xlsx","xls"],key="roster")
         if upload:
@@ -210,7 +233,7 @@ def administration_view() -> None:
             if st.button("Import roster",disabled=not user.strip()): upload.seek(0); import_sample_roster(upload); refresh()
         resources=get_resources(); editor=prepare_date_columns_for_editor(resources,RESOURCE_DATE_COLUMNS) if not resources.empty else pd.DataFrame(columns=["person_name","department","weekly_hours","active_status"])
         edited=st.data_editor(editor,num_rows="dynamic",hide_index=True,use_container_width=True)
-        if st.button("Save resources",disabled=not user.strip()): save_resources(edited.to_dict("records")); refresh()
+        if st.button("Save resources",disabled=not user.strip()): save_resources(edited.to_dict("records"),user.strip()); refresh()
     with holidays_tab:
         last=rows("SELECT imported_at,record_count,unmatched_count FROM holiday_imports ORDER BY id DESC LIMIT 1")
         if last:
@@ -234,9 +257,21 @@ def administration_view() -> None:
     with internal_tab:
         activities=get_internal_activities(); base=activities if not activities.empty else pd.DataFrame(columns=["id","activity_name","department","start_week","end_week","planned_hours_per_week","active","notes"])
         edited=st.data_editor(base,num_rows="dynamic",hide_index=True,use_container_width=True)
-        if st.button("Save internal activities",disabled=not user.strip()): save_internal_activities(edited.to_dict("records")); refresh()
+        if st.button("Save internal activities",disabled=not user.strip()): save_internal_activities(edited.to_dict("records"),user.strip()); refresh()
     with imports_tab:
         history=pd.DataFrame(rows("SELECT id,filename,imported_by,imported_at,record_count,unmatched_count,summary_json FROM holiday_imports ORDER BY id DESC")); st.subheader("Import history"); st.dataframe(history,hide_index=True,use_container_width=True)
+    with audit_tab:
+        st.subheader("Append-only audit log")
+        audit=pd.DataFrame(rows("SELECT id,timestamp,user_name,action,object_type,object_id,project_code,department,field_name,details FROM audit_log ORDER BY timestamp DESC,id DESC"))
+        if audit.empty: st.info("No audited changes yet.")
+        else:
+            dates=pd.to_datetime(audit.timestamp).dt.date; a1,a2,a3=st.columns(3); period=a1.date_input("Date range",(dates.min(),dates.max()),key="audit_dates"); users=["All",*sorted(audit.user_name.dropna().unique())]; au=a2.selectbox("User",users); entities=["All",*sorted(audit.object_type.dropna().unique())]; entity=a3.selectbox("Entity type",entities)
+            b1,b2,b3=st.columns(3); projects=["All",*sorted(audit.project_code.dropna().unique())]; ap=b1.selectbox("Project",projects,key="audit_project"); departments=["All",*sorted(audit.department.dropna().unique())]; ad=b2.selectbox("Department",departments,key="audit_department"); actions=["All",*sorted(audit.action.dropna().unique())]; aa=b3.selectbox("Action",actions)
+            filtered=audit.copy()
+            if isinstance(period,(tuple,list)) and len(period)==2: filtered=filtered[(dates>=period[0])&(dates<=period[1])]
+            for col,value in [("user_name",au),("object_type",entity),("project_code",ap),("department",ad),("action",aa)]:
+                if value!="All": filtered=filtered[filtered[col]==value]
+            st.dataframe(filtered.rename(columns={"timestamp":"When","user_name":"User","action":"Action","object_type":"Entity","project_code":"Project","department":"Department","details":"Summary"}),hide_index=True,use_container_width=True)
 
 
 projects_tab,planning_tab,administration_tab=st.tabs(["Projects","Planning","Administration"])
