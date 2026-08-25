@@ -451,9 +451,11 @@ class MvpWorkflowTests(unittest.TestCase):
         rs = bal[bal.department == "RS"].iloc[0]
 
         self.assertEqual(float(rs.available_capacity), 40.0)
-        self.assertEqual(float(rs.allocated_demand), 68.0)
-        self.assertEqual(float(rs.over_under_capacity), -28.0)
-        self.assertEqual(rs.status, "red")
+        # Forecast demand is not allocation: only manager_weekly_plan consumes
+        # capacity in the operational balance.
+        self.assertEqual(float(rs.allocated_demand), 0.0)
+        self.assertEqual(float(rs.over_under_capacity), 40.0)
+        self.assertEqual(rs.status, "green")
 
     def test_project_demand_validation_rejects_missing_and_unexplained_inputs(self):
         errors = validate_project_demand({"project_code": "P1", "project_name": "Project"})
