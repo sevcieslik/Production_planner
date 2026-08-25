@@ -932,20 +932,56 @@ def parse_employee_identity(value: Any) -> tuple[str | None, str]:
     return employee_id, name
 
 
+def _normalized_employee_name(value: Any) -> str:
+    """Return a comparable employee name, excluding a trailing employee ID."""
+    _, name = parse_employee_identity(value)
+    return " ".join(name.casefold().split())
+
+
+def resolve_resource_for_employee(
+    employee_value: Any,
+    resources: list[Any],
+    employee_id_mappings: dict[str, Any],
+) -> Any | None:
+    """Resolve an HR employee using saved ID, embedded ID, then exact name.
+
+    Embedded IDs and normalized names only resolve when they identify exactly one
+    resource.  This keeps the name fallback deterministic and avoids silently
+    assigning holidays where roster data is duplicated.
+    """
+    employee_id, _ = parse_employee_identity(employee_value)
+    if employee_id and employee_id in employee_id_mappings:
+        return employee_id_mappings[employee_id]
+
+    if employee_id:
+        id_matches = [
+            resource for resource in resources
+            if parse_employee_identity(resource["person_name"])[0] == employee_id
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+
+    normalized_name = _normalized_employee_name(employee_value)
+    if not normalized_name:
+        return None
+    name_matches = [
+        resource for resource in resources
+        if _normalized_employee_name(resource["person_name"]) == normalized_name
+    ]
+    return name_matches[0] if len(name_matches) == 1 else None
+
+
 def preview_holiday_snapshot(path: str | Path | Any) -> dict[str, Any]:
     """Parse and diff an approved-HR snapshot without changing SQLite."""
     ensure_mvp_schema(); df = _read_sample_table(path); cmap = _column_map(df.columns)
     resources = rows("SELECT * FROM mvp_resources")
-    by_name = {" ".join(r["person_name"].lower().split()): r for r in resources}
     id_map = {r["employee_id"]: r for r in rows(
         "SELECT m.employee_id,r.* FROM resource_employee_ids m JOIN mvp_resources r ON r.id=m.resource_id")}
     desired: dict[tuple[int, str], dict] = {}; unmatched=[]; issues=[]; mappings=[]
     for i, row in df.iterrows():
         raw = row.get(cmap.get("person_name", ""), "")
         employee_id, canonical_name = parse_employee_identity(raw)
-        person = id_map.get(employee_id) if employee_id else None
-        if not person:
-            person = by_name.get(" ".join(canonical_name.lower().split()))
+        person = resolve_resource_for_employee(raw, resources, id_map)
         if not person:
             unmatched.append(str(raw).strip()); continue
         if employee_id:
