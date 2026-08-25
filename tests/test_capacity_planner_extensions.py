@@ -9,7 +9,8 @@ from app.services.mvp import (
     apply_holiday_snapshot, apply_quick_allocation, capacity_balance,
     clear_future_allocation, import_approved_holidays, monthly_allocation_matrix,
     move_allocation, preview_holiday_snapshot, quick_allocation_values,
-    save_internal_activities, save_projects, save_resources,
+    resolve_resource_for_employee, save_internal_activities, save_projects,
+    save_resources,
 )
 
 
@@ -66,6 +67,45 @@ class PlannerExtensionTests(unittest.TestCase):
         p4=preview_holiday_snapshot(empty); self.assertEqual(len(p4["removed"]),1)
         apply_holiday_snapshot(p4,"h.csv","HR")
         self.assertEqual(db.rows("SELECT status FROM holidays")[0]["status"],"cancelled")
+
+    def test_holiday_employee_resolution_order(self):
+        save_resources([
+            {"person_name":"Allott, Mathew (32920)","department":"RS","weekly_hours":37.5,"active_status":"active"},
+            {"person_name":"Mapped, Employee (777)","department":"RS","weekly_hours":37.5,"active_status":"active"},
+            {"person_name":"Dunhill, Rachel","department":"RS","weekly_hours":37.5,"active_status":"active"},
+        ])
+        resources = db.rows("SELECT * FROM mvp_resources")
+        by_name = {row["person_name"]: row for row in resources}
+
+        exact = resolve_resource_for_employee("Allott, Mathew (32920)", resources, {})
+        self.assertEqual(exact["id"], by_name["Allott, Mathew (32920)"]["id"])
+        different_format = resolve_resource_for_employee("Completely Different (32920)", resources, {})
+        self.assertEqual(different_format["id"], exact["id"])
+
+        saved = resolve_resource_for_employee(
+            "Allott, Mathew (32920)", resources,
+            {"32920": by_name["Mapped, Employee (777)"]},
+        )
+        self.assertEqual(saved["id"], by_name["Mapped, Employee (777)"]["id"])
+
+        fallback = resolve_resource_for_employee("Dunhill, Rachel", resources, {})
+        self.assertEqual(fallback["id"], by_name["Dunhill, Rachel"]["id"])
+        self.assertIsNone(resolve_resource_for_employee("Nobody, Missing", resources, {}))
+
+    def test_embedded_id_preview_apply_mapping_consistency(self):
+        save_resources([{"person_name":"Allott, Mathew (32920)","department":"RS","weekly_hours":37.5,"active_status":"active"}])
+        upload = StringIO('Employee,Date From,Date To,Days of Absence\n"Different, Formatting (32920)",07/09/2026,07/09/2026,1\n')
+        upload.name = "holidays.csv"
+        preview = preview_holiday_snapshot(upload)
+        resource_id = db.rows("SELECT id FROM mvp_resources WHERE person_name='Allott, Mathew (32920)'")[0]["id"]
+        self.assertEqual(preview["unmatched"], [])
+        self.assertEqual(preview["records"][0]["resource_id"], resource_id)
+
+        apply_holiday_snapshot(preview, upload.name, "HR")
+        holiday = db.rows("SELECT resource_id FROM holidays WHERE employee_id='32920'")[0]
+        mapping = db.rows("SELECT resource_id FROM resource_employee_ids WHERE employee_id='32920'")[0]
+        self.assertEqual(holiday["resource_id"], resource_id)
+        self.assertEqual(mapping["resource_id"], resource_id)
 
 
 if __name__ == "__main__": unittest.main()
