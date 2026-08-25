@@ -985,7 +985,7 @@ def load_roster_csv(path: str | Path | Any = "sample-data/roster.csv") -> pd.Dat
     return pd.DataFrame(out)
 
 
-def import_sample_roster(path: str | Path | Any = "sample-data/roster.csv") -> MvpImportResult:
+def import_sample_roster(path: str | Path | Any = "sample-data/roster.csv", user: str = "System") -> MvpImportResult:
     ensure_mvp_schema(); result = MvpImportResult(); records=[]
     existing = {r["person_name"] for r in rows("SELECT person_name FROM mvp_resources")}
     for i, r in load_roster_csv(path).iterrows():
@@ -998,7 +998,7 @@ def import_sample_roster(path: str | Path | Any = "sample-data/roster.csv") -> M
         records.append(r.to_dict())
         if r["person_name"] in existing: result.updated_people_count += 1
         else: result.imported_people_count += 1
-    save_resources(records)
+    save_resources(records, user)
     return result
 
 

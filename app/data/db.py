@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
-DB_PATH = Path('data/production_planner.sqlite')
+DEFAULT_DB_PATH = Path('data/production_planner.sqlite')
+DB_PATH = Path(os.getenv('DATABASE_PATH', str(DEFAULT_DB_PATH)))
 SCHEMA_PATH = Path(__file__).with_name('schema.sql')
 
 
 def get_connection() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    path = Path(os.getenv('DATABASE_PATH', str(DB_PATH)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA busy_timeout = 5000')
+    conn.execute('PRAGMA journal_mode = WAL')
     return conn
 
 
@@ -95,8 +100,9 @@ def clear_demo_data() -> None:
 
 
 def reset_database(reload_seed: bool = True) -> None:
-    if DB_PATH.exists():
-        DB_PATH.unlink()
+    path = Path(os.getenv('DATABASE_PATH', str(DB_PATH)))
+    if path.exists():
+        path.unlink()
     initialize_database(seed=reload_seed)
 
 

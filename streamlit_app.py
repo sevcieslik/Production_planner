@@ -5,7 +5,8 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 
-from app.data.db import initialize_database, rows
+from app.auth import AuthenticationConfigurationError, authenticate, load_users, navigation_for_role
+from app.data.db import connect, initialize_database, rows, write_audit
 from app.services.mvp import (
     DISCIPLINES, RESOURCE_DATE_COLUMNS, allocation_timeline, apply_holiday_snapshot,
     apply_quick_allocation, capacity_balance, clear_future_allocation, create_escalation,
@@ -18,8 +19,65 @@ from app.services.mvp import (
 )
 
 st.set_page_config(page_title="Production Capacity Planner", layout="wide")
-initialize_database(seed=False)
-ensure_mvp_schema()
+
+
+def record_access_event(identity: str, action: str) -> None:
+    with connect() as conn:
+        write_audit(conn, identity, "Authentication", None, action, None, None, "Streamlit session")
+
+
+def require_authentication() -> None:
+    if st.session_state.get("authenticated"):
+        return
+    st.title("Production Planner")
+    try:
+        users = load_users()
+    except AuthenticationConfigurationError as exc:
+        st.error(f"Authentication configuration error: {exc}")
+        st.stop()
+    with st.form("login_form"):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in", type="primary")
+    if submitted:
+        authenticated_user = authenticate(email, password, users)
+        if authenticated_user is None:
+            st.error("Invalid email or password.")
+        else:
+            try:
+                initialize_database(seed=False)
+                ensure_mvp_schema()
+                record_access_event(authenticated_user.audit_identity, "Login")
+            except Exception as exc:
+                st.error(f"Database startup error: {exc}")
+                st.stop()
+            st.session_state.update(
+                authenticated=True,
+                user_email=authenticated_user.email,
+                display_name=authenticated_user.name,
+                role=authenticated_user.role,
+            )
+            st.rerun()
+    st.stop()
+
+
+require_authentication()
+try:
+    initialize_database(seed=False)
+    ensure_mvp_schema()
+except Exception as exc:
+    st.error(f"Database startup error: {exc}")
+    st.stop()
+
+user = f"{st.session_state.display_name} <{st.session_state.user_email}>"
+title_col, logout_col = st.columns([8, 1])
+title_col.title("Production Planner")
+title_col.caption(f"Signed in as {st.session_state.display_name} · {st.session_state.user_email}")
+if logout_col.button("Logout"):
+    record_access_event(user, "Logout")
+    for key in ("authenticated", "user_email", "display_name", "role"):
+        st.session_state.pop(key, None)
+    st.rerun()
 
 
 def monday(value: date) -> date:
@@ -30,8 +88,6 @@ def refresh() -> None:
     st.rerun()
 
 
-st.sidebar.title("Production Planner")
-user = st.sidebar.text_input("Your name", help="Recorded against planning and import changes.")
 planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
 planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
 weeks = week_starts(planning_start, planning_end) if planning_end >= planning_start else []
@@ -100,9 +156,9 @@ def allocation_dialog(default_department: str = "RS") -> None:
     over = current_total + total_effect > remaining + 0.005
     override = st.checkbox("I explicitly approve planning more than Remaining Hours", disabled=not over)
     if over: st.error("The request exceeds remaining project demand. Explicit approval is required.")
-    if st.button("Apply allocation", type="primary", disabled=not user.strip() or (over and not override)):
+    if st.button("Apply allocation", type="primary", disabled=not user or (over and not override)):
         try:
-            apply_quick_allocation(project_code, department, selected_weeks, values, user.strip(), operation, override)
+            apply_quick_allocation(project_code, department, selected_weeks, values, user, operation, override)
             st.success("Weekly manager allocation updated.")
             refresh()
         except ValueError as exc: st.error(str(exc))
@@ -132,7 +188,7 @@ def project_view() -> None:
         errors=validate_project_demand(record)
         if errors:
             for error in errors: st.error(error)
-        else: save_projects([record], user.strip()); st.success("Project demand saved."); refresh()
+        else: save_projects([record], user); st.success("Project demand saved."); refresh()
     st.subheader("Demand register")
     register=get_projects(False)
     st.dataframe(register[["priority","project_code","project_name","client","project_manager","spus","row_km","cct_km","rs_hours","gis_hours","pls_hours","end_date","status"]] if not register.empty else register,hide_index=True,use_container_width=True)
@@ -186,8 +242,8 @@ def planning_view() -> None:
                 if st.button("+ Allocate capacity",type="primary",key=f"allocate_{d}"): allocation_dialog(d)
                 disabled=[c for c in plan.columns if c not in week_cols]
                 edited=st.data_editor(plan,hide_index=True,use_container_width=True,disabled=disabled,column_config={w:st.column_config.NumberColumn(w,min_value=0.) for w in week_cols},key=f"plan_{d}")
-                if st.button("Save manager plan",disabled=not user.strip(),key=f"save_{d}"):
-                    try: save_manager_plan(edited,weeks,d,user.strip()); refresh()
+                if st.button("Save manager plan",disabled=not user,key=f"save_{d}"):
+                    try: save_manager_plan(edited,weeks,d,user); refresh()
                     except ValueError as exc: st.error(str(exc))
             else: st.dataframe(display,hide_index=True,use_container_width=True)
             d_bal=bal[bal.department==d].set_index("week_start")
@@ -211,16 +267,16 @@ def planning_view() -> None:
         with st.expander("+ Create issue"):
             projects=get_projects(False); codes=projects.project_code.tolist() if not projects.empty else []
             with st.form("create_issue"):
-                c1,c2=st.columns(2); code=c1.selectbox("Project",codes); dept=c2.selectbox("Department",DISCIPLINES,index=DISCIPLINES.index(department) if department in DISCIPLINES else 0); kind=st.selectbox("Issue type",["Capacity shortage","Data delay","Priority conflict","Skills gap"]); impact=st.number_input("Impact hours",0.); decision=st.text_area("Decision required"); owner_new=st.text_input("Owner"); due=st.date_input("Required by",date.today()); submit=st.form_submit_button("Create issue",disabled=not user.strip())
+                c1,c2=st.columns(2); code=c1.selectbox("Project",codes); dept=c2.selectbox("Department",DISCIPLINES,index=DISCIPLINES.index(department) if department in DISCIPLINES else 0); kind=st.selectbox("Issue type",["Capacity shortage","Data delay","Priority conflict","Skills gap"]); impact=st.number_input("Impact hours",0.); decision=st.text_area("Decision required"); owner_new=st.text_input("Owner"); due=st.date_input("Required by",date.today()); submit=st.form_submit_button("Create issue",disabled=not user)
             if submit:
-                try: create_escalation(code,dept,kind,impact,decision,owner_new,due,user.strip()); refresh()
+                try: create_escalation(code,dept,kind,impact,decision,owner_new,due,user); refresh()
                 except ValueError as exc: st.error(str(exc))
         if not issue_data.empty:
             with st.expander("Update / close / reopen issue"):
                 issue_id=st.selectbox("Issue",issue_data.id.tolist(),format_func=lambda i:f"#{i} · "+str(issue_data.loc[issue_data.id==i,"decision_required"].iloc[0])[:70]); current=issue_data[issue_data.id==issue_id].iloc[0]
                 new_owner=st.text_input("Owner",str(current.owner)); new_due=st.date_input("Required by",pd.to_datetime(current.required_by).date()); resolution=st.text_area("Resolution / outcome",str(current.resolution or "")); new_status=st.radio("Status",["Open","Closed"],index=0 if current.status=="Open" else 1,horizontal=True)
-                if st.button("Save issue",disabled=not user.strip()):
-                    try: update_issue(int(issue_id),user.strip(),owner=new_owner,required_by=new_due,resolution=resolution,status=new_status); refresh()
+                if st.button("Save issue",disabled=not user):
+                    try: update_issue(int(issue_id),user,owner=new_owner,required_by=new_due,resolution=resolution,status=new_status); refresh()
                     except ValueError as exc: st.error(str(exc))
 
 def administration_view() -> None:
@@ -230,10 +286,10 @@ def administration_view() -> None:
         upload=st.file_uploader("Roster CSV / Excel",type=["csv","xlsx","xls"],key="roster")
         if upload:
             preview=load_roster_csv(upload); st.dataframe(preview,hide_index=True)
-            if st.button("Import roster",disabled=not user.strip()): upload.seek(0); import_sample_roster(upload); refresh()
+            if st.button("Import roster",disabled=not user): upload.seek(0); import_sample_roster(upload, user); refresh()
         resources=get_resources(); editor=prepare_date_columns_for_editor(resources,RESOURCE_DATE_COLUMNS) if not resources.empty else pd.DataFrame(columns=["person_name","department","weekly_hours","active_status"])
         edited=st.data_editor(editor,num_rows="dynamic",hide_index=True,use_container_width=True)
-        if st.button("Save resources",disabled=not user.strip()): save_resources(edited.to_dict("records"),user.strip()); refresh()
+        if st.button("Save resources",disabled=not user): save_resources(edited.to_dict("records"),user); refresh()
     with holidays_tab:
         last=rows("SELECT imported_at,record_count,unmatched_count FROM holiday_imports ORDER BY id DESC LIMIT 1")
         if last:
@@ -245,7 +301,7 @@ def administration_view() -> None:
             preview=preview_holiday_snapshot(upload); st.write({"New":len(preview["new"]),"Changed":len(preview["changed"]),"Removed/cancelled":len(preview["removed"]),"Unmatched":len(preview["unmatched"])})
             if preview["unmatched"]: st.warning("Unmatched employees: "+", ".join(preview["unmatched"]))
             st.dataframe(pd.DataFrame(preview["new"]+preview["changed"]),hide_index=True)
-            if st.button("Apply holiday snapshot",type="primary",disabled=not user.strip()): apply_holiday_snapshot(preview,upload.name,user.strip()); refresh()
+            if st.button("Apply holiday snapshot",type="primary",disabled=not user): apply_holiday_snapshot(preview,upload.name,user); refresh()
         h=get_holidays(); c1,c2,c3=st.columns(3); dept=c1.selectbox("Department",["All",*DISCIPLINES],key="hdept"); names=["All"]+(sorted(h.person_name.dropna().unique()) if not h.empty else []); person=c2.selectbox("Employee",names); period=c3.selectbox("Period",["Future","Past","All"])
         if not h.empty:
             filtered=h if dept=="All" else h[h.department==dept]
@@ -257,7 +313,7 @@ def administration_view() -> None:
     with internal_tab:
         activities=get_internal_activities(); base=activities if not activities.empty else pd.DataFrame(columns=["id","activity_name","department","start_week","end_week","planned_hours_per_week","active","notes"])
         edited=st.data_editor(base,num_rows="dynamic",hide_index=True,use_container_width=True)
-        if st.button("Save internal activities",disabled=not user.strip()): save_internal_activities(edited.to_dict("records"),user.strip()); refresh()
+        if st.button("Save internal activities",disabled=not user): save_internal_activities(edited.to_dict("records"),user); refresh()
     with imports_tab:
         history=pd.DataFrame(rows("SELECT id,filename,imported_by,imported_at,record_count,unmatched_count,summary_json FROM holiday_imports ORDER BY id DESC")); st.subheader("Import history"); st.dataframe(history,hide_index=True,use_container_width=True)
     with audit_tab:
@@ -274,7 +330,28 @@ def administration_view() -> None:
             st.dataframe(filtered.rename(columns={"timestamp":"When","user_name":"User","action":"Action","object_type":"Entity","project_code":"Project","department":"Department","details":"Summary"}),hide_index=True,use_container_width=True)
 
 
-projects_tab,planning_tab,administration_tab=st.tabs(["Projects","Planning","Administration"])
-with projects_tab: project_view()
-with planning_tab: planning_view()
-with administration_tab: administration_view()
+def principles_view() -> None:
+    st.header("Production Capacity Planning Core Principles")
+    principles = [
+        ("Planning is an Escalation Tool", "Capacity planning is a continuous activity that production team managers do at least twice a week. It must produce an updated capacity plan with no projects carrying unplanned hours, plus questions, scenarios, or challenges for escalation to department heads."),
+        ("All Time is Accounted For", "Capacity is finite and deadlines are contractual. Administrative, QA, training, and other time must be accurately accounted for alongside the corresponding reduction in planned project hours, so true production capacity remains visible."),
+        ("Priority Dictates Planning", "Project prioritisation determines planning frequency and accuracy. Late-delivery penalties are the least flexible commitments; trade-offs made to protect them must remain visible in the plan."),
+        ("Base Plans on Realistic, Evidenced Rates", "Use realistic scenarios supported by historical evidence, automation improvements, and bid-model budget hours. Material deviations and assumptions must be explicit before planning is complete."),
+        ("The Sequence of Our Work Is Non-negotiable", "The workflow is sequential: Capture delays shift downstream work, and RS or GIS changes must flow into the PLS plan. Failing to update downstream dependencies makes the capacity plan unreliable."),
+        ("Dynamic Response to Bottlenecks", "Do not force full utilisation within rigid team silos. Cross-trained staff should move dynamically to the stage constraining delivery, including shifts from RS to GIS or PLS as automation changes the bottleneck."),
+    ]
+    for number, (heading, detail) in enumerate(principles, 1):
+        st.markdown(f"### {number}. **{heading}.**")
+        st.write(detail)
+    st.markdown("**Required outputs from every planning activity:**")
+    st.markdown("- An updated capacity plan, leaving no projects with unplanned hours.\n"
+                "- A list of questions, scenarios, or challenges to escalate to department heads.")
+
+
+labels = navigation_for_role(st.session_state.role)
+tabs = st.tabs(labels)
+with tabs[0]: project_view()
+with tabs[1]: planning_view()
+with tabs[2]: principles_view()
+if st.session_state.role == "admin":
+    with tabs[3]: administration_view()
