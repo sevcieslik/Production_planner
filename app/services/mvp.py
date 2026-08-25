@@ -376,9 +376,32 @@ def save_projects(records: Iterable[dict]) -> None:
         for r in records:
             code = str(r.get("project_code") or "").strip()
             name = str(r.get("project_name") or "").strip()
+            original_code = str(r.get("_original_project_code") or code).strip()
 
             if not code or not name:
                 continue
+
+            if original_code != code:
+                if conn.execute(
+                    "SELECT 1 FROM mvp_projects WHERE project_code=?", (code,)
+                ).fetchone():
+                    raise ValueError(f"Project code {code} is already in use.")
+                # The project code is the legacy key used by manager planning.
+                # Defer FK checks while renaming it and its related records as one
+                # atomic operation.
+                conn.execute("PRAGMA defer_foreign_keys=ON")
+                conn.execute(
+                    "UPDATE mvp_projects SET project_code=? WHERE project_code=?",
+                    (code, original_code),
+                )
+                conn.execute(
+                    "UPDATE manager_weekly_plan SET project_code=? WHERE project_code=?",
+                    (code, original_code),
+                )
+                conn.execute(
+                    "UPDATE planning_escalations SET project_code=? WHERE project_code=?",
+                    (code, original_code),
+                )
 
             vals = {k: r.get(k) for k in PROJECT_FIELDS}
             vals["loading_type"] = normalize_loading_type(vals.get("loading_type"))
@@ -555,7 +578,15 @@ def manager_plan(weeks: list[date], department: str) -> pd.DataFrame:
             row[key] = round(value, 2)
         row["Unplanned Hours"] = round(max(row["Remaining Hours"] - sum(row[w.isoformat()] for w in weeks), 0), 2)
         output.append(row)
-    return pd.DataFrame(output).sort_values(["Priority", "Required By", "Project Code"])
+    frame = pd.DataFrame(output).sort_values(["Priority", "Required By", "Project Code"])
+    # Keep the unresolved balance beside the project facts rather than beyond
+    # what can be a long sequence of weekly columns.
+    week_columns = [week.isoformat() for week in weeks]
+    leading = [
+        "Priority", "Project Code", "Project", "Forecast Hours", "Actual Hours",
+        "Remaining Hours", "Unplanned Hours", "Data Available", "Required By",
+    ]
+    return frame[leading + week_columns]
 
 
 def save_manager_plan(frame: pd.DataFrame, weeks: list[date], department: str, user: str) -> None:
