@@ -659,11 +659,21 @@ def _number(value: Any, default: float = 0.0) -> float:
     return default if pd.isna(n) else float(n)
 
 
-def _read_sample_table(path: str | Path) -> pd.DataFrame:
-    path = Path(path)
-    if path.suffix.lower() == ".csv":
+def _read_sample_table(path: str | Path | Any) -> pd.DataFrame:
+    """Read a roster/holiday table from a path or Streamlit uploaded file."""
+    is_upload = hasattr(path, "read")
+    name = str(getattr(path, "name", path))
+    suffix = Path(name).suffix.lower()
+    if suffix == ".csv":
         return pd.read_csv(path)
-    if path.read_bytes().lstrip().lower().startswith(b"<table"):
+    if is_upload:
+        position = path.tell() if hasattr(path, "tell") else 0
+        content = path.read()
+        if hasattr(path, "seek"):
+            path.seek(position)
+    else:
+        content = Path(path).read_bytes()
+    if content.lstrip().lower().startswith(b"<table"):
         class Parser(HTMLParser):
             def __init__(self):
                 super().__init__(); self.rows=[]; self.row=[]; self.buf=[]; self.cell=False
@@ -676,7 +686,7 @@ def _read_sample_table(path: str | Path) -> pd.DataFrame:
                 if tag in ("td", "th") and self.cell:
                     self.row.append(" ".join("".join(self.buf).split())); self.cell=False
                 if tag == "tr" and self.row: self.rows.append(self.row)
-        parser = Parser(); parser.feed(path.read_text(errors="ignore"))
+        parser = Parser(); parser.feed(content.decode(errors="ignore"))
         header = parser.rows[0]
         data = [r for r in parser.rows[1:] if any(c.strip() for c in r)]
         width = len(header)
@@ -684,7 +694,7 @@ def _read_sample_table(path: str | Path) -> pd.DataFrame:
     return pd.read_excel(path)
 
 
-def load_roster_csv(path: str | Path = "sample-data/roster.csv") -> pd.DataFrame:
+def load_roster_csv(path: str | Path | Any = "sample-data/roster.csv") -> pd.DataFrame:
     df = _read_sample_table(path)
     cmap = _column_map(df.columns)
     out = []
@@ -699,7 +709,7 @@ def load_roster_csv(path: str | Path = "sample-data/roster.csv") -> pd.DataFrame
     return pd.DataFrame(out)
 
 
-def import_sample_roster(path: str | Path = "sample-data/roster.csv") -> MvpImportResult:
+def import_sample_roster(path: str | Path | Any = "sample-data/roster.csv") -> MvpImportResult:
     ensure_mvp_schema(); result = MvpImportResult(); records=[]
     existing = {r["person_name"] for r in rows("SELECT person_name FROM mvp_resources")}
     for i, r in load_roster_csv(path).iterrows():

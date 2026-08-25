@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import BytesIO
 from datetime import date
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from app.services.mvp import (
     import_sample_roster,
     get_data_version,
     load_projects_csv,
+    load_roster_csv,
     normalise_date_for_db,
     prepare_date_columns_for_editor,
     save_projects,
@@ -215,6 +217,19 @@ class MvpWorkflowTests(unittest.TestCase):
         self.assertGreater(len(df), 0)
         self.assertEqual(import_default_projects(), len(df))
         self.assertGreater(len(db.rows("SELECT * FROM mvp_projects")), 0)
+
+    def test_roster_import_accepts_uploaded_csv_file(self):
+        upload = BytesIO(b"person_name,department,weekly_hours\nAlex Example,RS,40\n")
+        upload.name = "roster.csv"
+
+        preview = load_roster_csv(upload)
+        self.assertEqual(preview.loc[0, "person_name"], "Alex Example")
+        upload.seek(0)
+        result = import_sample_roster(upload)
+
+        self.assertEqual(result.imported_people_count, 1)
+        saved = db.rows("SELECT person_name,department,weekly_hours FROM mvp_resources")
+        self.assertEqual(saved, [{"person_name": "Alex Example", "department": "RS", "weekly_hours": 40.0}])
 
     def test_editable_project_save_update(self):
         save_projects(

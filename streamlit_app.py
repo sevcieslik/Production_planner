@@ -15,6 +15,8 @@ from app.services.mvp import (
     ensure_mvp_schema,
     get_projects,
     get_resources,
+    import_sample_roster,
+    load_roster_csv,
     manager_plan,
     prepare_date_columns_for_editor,
     save_manager_plan,
@@ -131,79 +133,158 @@ with capacity_tab:
     if not weeks:
         st.error("Planning end must not be before planning start.")
     else:
-        department = st.segmented_control("Department", DISCIPLINES, default="RS")
-        plan = manager_plan(weeks, department)
+        department = st.segmented_control(
+            "Capacity view", ["All", *DISCIPLINES], default="All",
+            help="View the combined roster capacity or select a department to edit its project plan.",
+        )
         capacity = weekly_department_capacity(weeks)
-        cap = capacity[capacity.department == department].set_index("week_start")["available_capacity"].to_dict() if not capacity.empty else {}
-
-        if plan.empty:
-            st.info(f"No active {department} demand is available. Enter it on Project demand first.")
-        else:
+        if department == "All":
             week_columns = [w.isoformat() for w in weeks]
-            totals = {week: float(plan[week].sum()) for week in week_columns}
-            summary = pd.DataFrame([
-                {"Measure": "Available capacity", **{w: cap.get(w, 0.0) for w in week_columns}},
-                {"Measure": "Planned demand", **totals},
-                {"Measure": "Over / under", **{w: cap.get(w, 0.0) - totals[w] for w in week_columns}},
-            ])
-            shortage = sum(max(totals[w] - cap.get(w, 0.0), 0) for w in week_columns)
-            unplanned = float(plan["Unplanned Hours"].sum())
+            summary_rows = []
+            total_capacity = {week: 0.0 for week in week_columns}
+            total_demand = {week: 0.0 for week in week_columns}
+            remaining = unplanned = 0.0
+            for discipline in DISCIPLINES:
+                discipline_plan = manager_plan(weeks, discipline)
+                discipline_capacity = (
+                    capacity[capacity.department == discipline]
+                    .set_index("week_start")["available_capacity"].to_dict()
+                    if not capacity.empty else {}
+                )
+                demand = {week: float(discipline_plan[week].sum()) if not discipline_plan.empty else 0.0 for week in week_columns}
+                remaining += float(discipline_plan["Remaining Hours"].sum()) if not discipline_plan.empty else 0.0
+                unplanned += float(discipline_plan["Unplanned Hours"].sum()) if not discipline_plan.empty else 0.0
+                for week in week_columns:
+                    total_capacity[week] += discipline_capacity.get(week, 0.0)
+                    total_demand[week] += demand[week]
+                summary_rows.extend([
+                    {"Measure": f"{discipline} available capacity", **{w: discipline_capacity.get(w, 0.0) for w in week_columns}},
+                    {"Measure": f"{discipline} planned demand", **demand},
+                    {"Measure": f"{discipline} over / under", **{w: discipline_capacity.get(w, 0.0) - demand[w] for w in week_columns}},
+                ])
+            shortage = sum(max(total_demand[w] - total_capacity[w], 0) for w in week_columns)
             m1, m2, m3 = st.columns(3)
-            m1.metric("Remaining project demand", f"{plan['Remaining Hours'].sum():,.1f} h")
-            m2.metric("Unplanned", f"{unplanned:,.1f} h")
-            m3.metric("Weekly capacity shortage", f"{shortage:,.1f} h")
-            st.dataframe(summary, use_container_width=True, hide_index=True)
+            m1.metric("All roster capacity", f"{sum(total_capacity.values()):,.1f} h")
+            m2.metric("All remaining demand", f"{remaining:,.1f} h")
+            m3.metric("Combined weekly shortage", f"{shortage:,.1f} h")
+            summary_rows.extend([
+                {"Measure": "TOTAL available capacity", **total_capacity},
+                {"Measure": "TOTAL planned demand", **total_demand},
+                {"Measure": "TOTAL over / under", **{w: total_capacity[w] - total_demand[w] for w in week_columns}},
+            ])
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+            if unplanned:
+                st.caption(f"{unplanned:,.1f} hours are not yet assigned to a week.")
+            st.info("Select RS, GIS or PLS above to edit and save that department's project plan.")
+        if department != "All":
+            plan = manager_plan(weeks, department)
+            cap = capacity[capacity.department == department].set_index("week_start")["available_capacity"].to_dict() if not capacity.empty else {}
 
-            disabled = [c for c in plan.columns if c not in week_columns]
-            edited = st.data_editor(plan, hide_index=True, use_container_width=True, disabled=disabled,
-                                    column_config={w: st.column_config.NumberColumn(w, min_value=0.0, step=1.0) for w in week_columns})
-            # Recalculate the explicit unresolved balance after edits.
-            edited["Unplanned Hours"] = (edited["Remaining Hours"] - edited[week_columns].sum(axis=1)).clip(lower=0).round(2)
-            if st.button("Save manager plan", type="primary", disabled=not user.strip()):
-                try:
-                    save_manager_plan(edited, weeks, department, user.strip())
-                    st.success("Manager plan saved.")
-                    rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-            if not user.strip():
-                st.caption("Enter your name in the sidebar to save or complete a review.")
+            if plan.empty:
+                st.info(f"No active {department} demand is available. Enter it on Project demand first.")
+            else:
+                week_columns = [w.isoformat() for w in weeks]
+                totals = {week: float(plan[week].sum()) for week in week_columns}
+                summary = pd.DataFrame([
+                    {"Measure": "Available capacity", **{w: cap.get(w, 0.0) for w in week_columns}},
+                    {"Measure": "Planned demand", **totals},
+                    {"Measure": "Over / under", **{w: cap.get(w, 0.0) - totals[w] for w in week_columns}},
+                ])
+                shortage = sum(max(totals[w] - cap.get(w, 0.0), 0) for w in week_columns)
+                unplanned = float(plan["Unplanned Hours"].sum())
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Remaining project demand", f"{plan['Remaining Hours'].sum():,.1f} h")
+                m2.metric("Unplanned", f"{unplanned:,.1f} h")
+                m3.metric("Weekly capacity shortage", f"{shortage:,.1f} h")
+                st.dataframe(summary, use_container_width=True, hide_index=True)
 
-            with st.expander("Escalate an unresolved issue", expanded=unplanned > 0 or shortage > 0):
-                codes = plan["Project Code"].tolist()
-                with st.form("escalation_form"):
-                    esc_project = st.selectbox("Project", codes)
-                    issue = st.selectbox("Issue type", ["Capacity shortage", "Data delay", "Estimate uncertainty", "Priority conflict", "Skills gap", "Dependency issue"])
-                    impact = st.number_input("Impact / shortage hours", min_value=0.0, value=round(max(unplanned, shortage), 1))
-                    decision = st.text_area("Decision required *", placeholder="State the decision or trade-off required from leadership.")
-                    owner = st.text_input("Escalation owner *")
-                    required_by = st.date_input("Decision required by", date.today())
-                    escalate = st.form_submit_button("Create escalation")
-                if escalate:
+                disabled = [c for c in plan.columns if c not in week_columns]
+                edited = st.data_editor(plan, hide_index=True, use_container_width=True, disabled=disabled,
+                                        column_config={w: st.column_config.NumberColumn(w, min_value=0.0, step=1.0) for w in week_columns})
+                # Recalculate the explicit unresolved balance after edits.
+                edited["Unplanned Hours"] = (edited["Remaining Hours"] - edited[week_columns].sum(axis=1)).clip(lower=0).round(2)
+                if st.button("Save manager plan", type="primary", disabled=not user.strip()):
                     try:
-                        create_escalation(esc_project, department, issue, impact, decision, owner, required_by)
-                        st.success("Escalation created and linked to this department plan.")
+                        save_manager_plan(edited, weeks, department, user.strip())
+                        st.success("Manager plan saved.")
+                        rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                if not user.strip():
+                    st.caption("Enter your name in the sidebar to save or complete a review.")
+
+                with st.expander("Escalate an unresolved issue", expanded=unplanned > 0 or shortage > 0):
+                    codes = plan["Project Code"].tolist()
+                    with st.form("escalation_form"):
+                        esc_project = st.selectbox("Project", codes)
+                        issue = st.selectbox("Issue type", ["Capacity shortage", "Data delay", "Estimate uncertainty", "Priority conflict", "Skills gap", "Dependency issue"])
+                        impact = st.number_input("Impact / shortage hours", min_value=0.0, value=round(max(unplanned, shortage), 1))
+                        decision = st.text_area("Decision required *", placeholder="State the decision or trade-off required from leadership.")
+                        owner = st.text_input("Escalation owner *")
+                        required_by = st.date_input("Decision required by", date.today())
+                        escalate = st.form_submit_button("Create escalation")
+                    if escalate:
+                        try:
+                            create_escalation(esc_project, department, issue, impact, decision, owner, required_by)
+                            st.success("Escalation created and linked to this department plan.")
+                            rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
+
+                if st.button("Complete planning review", disabled=not user.strip()):
+                    try:
+                        complete_planning_review(edited, department, planning_start, planning_end, user.strip())
+                        st.success("Planning review completed.")
                         rerun()
                     except ValueError as exc:
                         st.error(str(exc))
 
-            if st.button("Complete planning review", disabled=not user.strip()):
-                try:
-                    complete_planning_review(edited, department, planning_start, planning_end, user.strip())
-                    st.success("Planning review completed.")
-                    rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-
-        escalations = pd.DataFrame(rows("SELECT id,project_code,department,issue_type,impact_hours,decision_required,owner,required_by,status FROM planning_escalations ORDER BY status,required_by"))
-        st.subheader("Open decisions and escalations")
-        if escalations.empty:
-            st.caption("No escalations have been recorded.")
-        else:
-            st.dataframe(escalations, use_container_width=True, hide_index=True)
+            escalations = pd.DataFrame(rows("SELECT id,project_code,department,issue_type,impact_hours,decision_required,owner,required_by,status FROM planning_escalations ORDER BY status,required_by"))
+            st.subheader("Open decisions and escalations")
+            if escalations.empty:
+                st.caption("No escalations have been recorded.")
+            else:
+                st.dataframe(escalations, use_container_width=True, hide_index=True)
 
 with st.sidebar.expander("Administration", expanded=False):
     st.caption("Operational roster maintenance is separated from project planning.")
+    if message := st.session_state.pop("roster_import_message", None):
+        st.success(message)
+    st.markdown("**Import roster**")
+    st.caption("Upload a CSV or Excel roster. Required columns: Employee, Department and Hrs (or person_name, department and weekly_hours). Existing people are updated by name.")
+    st.download_button(
+        "Download CSV template",
+        data="person_name,department,weekly_hours\nJane Smith,RS,37.5\n",
+        file_name="roster-template.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    roster_upload = st.file_uploader("Roster file", type=["csv", "xlsx", "xls"], key="roster_upload")
+    if roster_upload is not None:
+        try:
+            roster_preview = load_roster_csv(roster_upload)
+            st.dataframe(roster_preview, hide_index=True, use_container_width=True)
+            valid_rows = int(
+                (roster_preview["person_name"].fillna("").astype(str).str.strip().ne("") &
+                 roster_preview["department"].isin(DISCIPLINES)).sum()
+            )
+            st.caption(f"{valid_rows} of {len(roster_preview)} rows are ready to import.")
+            if st.button("Import and save roster", disabled=not user.strip(), type="primary", use_container_width=True):
+                roster_upload.seek(0)
+                result = import_sample_roster(roster_upload)
+                st.session_state["roster_import_message"] = (
+                    f"Roster saved: {result.imported_people_count} added, "
+                    f"{result.updated_people_count} updated, {result.skipped_rows} skipped."
+                )
+                if result.validation_issues:
+                    st.warning("\n".join(result.validation_issues))
+                rerun()
+            if not user.strip():
+                st.caption("Enter your name above to import and save the roster.")
+        except (ValueError, TypeError, KeyError) as exc:
+            st.error(f"Could not read roster: {exc}")
+    st.divider()
+    st.markdown("**Edit roster manually**")
     resources = get_resources()
     if resources.empty:
         resources = pd.DataFrame(columns=["person_name", "department", "weekly_hours", "holiday_booked_hours", "holiday_remaining_hours", "active_status", "status_reason", "status_start_date", "status_end_date"])
