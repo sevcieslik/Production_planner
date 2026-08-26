@@ -18,7 +18,7 @@ from app.services.mvp import (
     validate_project_demand, week_starts, weekly_department_capacity, get_issues, update_issue,
     parse_audit_timestamps,
     TEMPORARY_ADJUSTMENT_TYPES, get_capacity_adjustments, save_capacity_adjustment,
-    sequence_analysis,
+    sequence_analysis, future_project_allocation, resource_availability_matrix,
 )
 from app.services.setup_transfer import (
     apply_planner_setup, apply_project_import, export_planner_setup,
@@ -131,8 +131,9 @@ def allocation_dialog(default_department: str = "RS") -> None:
     remaining = project_remaining_hours(project_code, department)
     values = quick_allocation_values(mode, selected_weeks, people=people, hours_per_person=hours_person,
                                      hours_per_week=hours_week, remaining_hours=remaining)
-    operation_label = st.radio("Write mode", ["Add to existing allocation", "Replace allocation in selected period"], horizontal=True)
-    operation = "add" if operation_label.startswith("Add") else "replace"
+    operation_label = st.radio("Write mode", ["Add to existing allocation", "Replace full future allocation"], horizontal=True,
+                               help="Replace clears only this project's department plan from Planning start onwards, including weeks beyond Planning end.")
+    operation = "add" if operation_label.startswith("Add") else "replace_future"
     cap = weekly_department_capacity(selected_weeks)
     capacity_map = cap[cap.department == department].set_index("week_start").available_capacity.to_dict() if not cap.empty else {}
     existing = rows("SELECT week_start,planned_hours FROM manager_weekly_plan WHERE department=? AND week_start BETWEEN ? AND ?",
@@ -141,34 +142,52 @@ def allocation_dialog(default_department: str = "RS") -> None:
     for row in existing: all_existing[row["week_start"]] += float(row["planned_hours"])
     project_existing = {(r["week_start"]): float(r["planned_hours"]) for r in rows(
         "SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=?", (project_code, department))}
+    future_existing = sum(value for week, value in project_existing.items() if week >= monday(planning_start).isoformat())
+    removed_total = future_existing if operation == "replace_future" else 0.0
     preview = []
     for week, added in zip(selected_weeks, values):
         old_project = project_existing.get(week.isoformat(), 0.0)
         delta = added if operation == "add" else added - old_project
         new_total = all_existing[week.isoformat()] + delta
         preview.append({"Week": week.strftime("%d %b %Y"), "Available Capacity": capacity_map.get(week.isoformat(), 0),
-                        "Existing Allocation": all_existing[week.isoformat()], "Added Allocation": delta,
-                        "New Total": new_total, "Balance": capacity_map.get(week.isoformat(), 0) - new_total})
-    total_effect = sum(r["Added Allocation"] for r in preview)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Allocation change", f"{total_effect:,.2f} h")
-    c2.metric("Current remaining demand", f"{remaining:,.2f} h")
-    c3.metric("Remaining after", f"{remaining - (sum(project_existing.values()) + total_effect):,.2f} h")
+                        "Existing Total Allocation": all_existing[week.isoformat()], "Allocation Being Added": added,
+                        "Allocation Being Removed": old_project if operation == "replace_future" else 0,
+                        "Net Allocation Change": delta, "New Total Allocation": new_total,
+                        "Balance": capacity_map.get(week.isoformat(), 0) - new_total})
+    added_total = sum(values)
+    net_change = added_total if operation == "add" else added_total - removed_total
+    new_future_total = future_existing + added_total if operation == "add" else added_total
+    metric_values = [
+        ("Current remaining demand", remaining), ("Existing future project allocation", future_existing),
+        ("Allocation being added", added_total), ("Allocation being removed", removed_total),
+        ("Net allocation change", net_change), ("Remaining after", max(remaining-new_future_total, 0)),
+    ]
+    for column, (label, value) in zip(st.columns(6), metric_values): column.metric(label, f"{value:,.2f} h")
     if mode == "Spread remaining":
         st.caption(f"{len(values)} weeks · required average {values[0] if values else 0:,.2f} h/week · approx. {(values[0] / 37.5 if values else 0):,.2f} FTE at 37.5 h")
     st.dataframe(pd.DataFrame(preview), hide_index=True, use_container_width=True)
     if any(r["Balance"] < 0 for r in preview):
         st.warning("This allocation creates a capacity shortage. It may still be applied and escalated.")
-    current_total = sum(project_existing.values())
-    over = current_total + total_effect > remaining + 0.005
+    over = new_future_total > remaining + 0.005
     override = st.checkbox("I explicitly approve planning more than Remaining Hours", disabled=not over)
     if over: st.error("The request exceeds remaining project demand. Explicit approval is required.")
     if st.button("Apply allocation", type="primary", disabled=not user or (over and not override)):
         try:
-            apply_quick_allocation(project_code, department, selected_weeks, values, user, operation, override)
+            apply_quick_allocation(project_code, department, selected_weeks, values, user, operation, override, planning_start)
             st.success("Weekly manager allocation updated.")
             refresh()
         except ValueError as exc: st.error(str(exc))
+    st.divider()
+    if st.button("Clear current allocation", type="secondary"):
+        st.session_state[f"confirm_clear_{project_code}_{department}"] = True
+    if st.session_state.get(f"confirm_clear_{project_code}_{department}"):
+        st.warning(f"Clear all future {department} allocation for {project_code} from {monday(planning_start):%d %b %Y} onwards?")
+        cancel, confirm = st.columns(2)
+        if cancel.button("Cancel", use_container_width=True):
+            st.session_state.pop(f"confirm_clear_{project_code}_{department}", None); refresh()
+        if confirm.button("Clear allocation", type="primary", use_container_width=True):
+            clear_future_allocation(project_code, department, planning_start, user)
+            st.session_state.pop(f"confirm_clear_{project_code}_{department}", None); refresh()
 
 
 def project_view() -> None:
@@ -211,7 +230,7 @@ def planning_view() -> None:
     health=project_health_plans(planning_start,department)
     with overview:
         remaining=float(health["Remaining Hours"].sum()) if not health.empty else 0
-        unplanned=float(health.loc[health.Health=="Unplanned","Remaining Hours"].sum()) if not health.empty else 0
+        unplanned=float(health["Unplanned Hours"].sum()) if not health.empty else 0
         shortage=selected[selected.over_under_capacity<0]
         open_issues=len(get_issues("Open",department))
         metrics=st.columns(6)
@@ -231,14 +250,15 @@ def planning_view() -> None:
         gantt=allocation_timeline(weeks,department)
         if gantt.empty: st.info("No allocation or forecast baseline in this range.")
         else:
-            gantt["Row"]=gantt["Project"]+"  ·  "+gantt["Discipline"]; gantt["Start"]=pd.to_datetime(gantt.Start); gantt["End"]=pd.to_datetime(gantt.End); gantt["Deadline"]=pd.to_datetime(gantt["Required by"])
+            gantt["Row"]=gantt["Project"]+"  ·  "+gantt["Discipline"]; gantt["Start"]=pd.to_datetime(gantt.Start).dt.tz_localize(None); gantt["End"]=pd.to_datetime(gantt.End).dt.tz_localize(None); gantt["End display"]=gantt["End"]+pd.Timedelta(days=1); gantt["Deadline"]=pd.to_datetime(gantt["Required by"],errors="coerce").dt.tz_localize(None)
             order=gantt["Row"].drop_duplicates().tolist()
             tips=["Project","project_code","Discipline","Start:T","End:T","Plan source","Remaining hours:Q","Allocated hours:Q","Required by:T","Health status","Shortfall / surplus:Q"]
-            bars=alt.Chart(gantt).mark_bar(cornerRadius=2).encode(x=alt.X("Start:T",scale=alt.Scale(domain=[planning_start,planning_end+timedelta(days=6)]),title="Calendar date"),x2="End:T",y=alt.Y("Row:N",sort=order,title="Project / department"),color=alt.Color("Discipline:N",scale=alt.Scale(domain=DISCIPLINES,range=["#72a5d3","#76b77b","#c9ad6a"])),opacity=alt.Opacity("Plan source:N",scale=alt.Scale(domain=["Manager allocation","Forecast baseline"],range=[1,.28])),tooltip=tips)
+            domain=[pd.Timestamp(planning_start),pd.Timestamp(planning_end+timedelta(days=7))]
+            bars=alt.Chart(gantt).mark_bar(cornerRadius=2).encode(x=alt.X("Start:T",scale=alt.Scale(domain=domain),title="Calendar date"),x2=alt.X2("End display:T"),y=alt.Y("Row:N",sort=order,title="Project / department"),color=alt.Color("Discipline:N",scale=alt.Scale(domain=DISCIPLINES,range=["#72a5d3","#76b77b","#c9ad6a"])),opacity=alt.Opacity("Plan source:N",scale=alt.Scale(domain=["Manager allocation","Forecast baseline"],range=[1,.28])),tooltip=tips)
             deadlines=alt.Chart(gantt).mark_tick(color="#b23a48",thickness=2,size=18).encode(x="Deadline:T",y=alt.Y("Row:N",sort=order),tooltip=["Project","Required by:T","Late"])
             st.altair_chart((bars+deadlines).properties(height=max(240,len(gantt)*28)),use_container_width=True)
             st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
-            st.dataframe(gantt.drop(columns=["Row","Deadline"]),hide_index=True,use_container_width=True)
+            st.dataframe(gantt.drop(columns=["Row","Deadline","End display"]),hide_index=True,use_container_width=True)
     with sequence_tab:
         st.subheader("RS → GIS → PLS sequence analysis")
         st.caption("Advisory only: findings use explicit manager allocations and never move work or change project health.")
@@ -299,11 +319,47 @@ def planning_view() -> None:
 def resource_management_view() -> None:
     st.header("Resource Management")
     st.caption("Operational availability changes preserve each employee's home department and contracted hours.")
-    resources_tab,holidays_tab,adjustments_tab=st.tabs(["Resources / roster","Absence & Holidays","Temporary assignments"])
+    availability_tab,resources_tab,holidays_tab,adjustments_tab=st.tabs(["Availability","Resources / roster","Absence & Holidays","Temporary assignments"])
+    with availability_tab:
+        st.subheader("Workforce availability")
+        a,b,c,d=st.columns([1,2,1,1])
+        availability_department=a.selectbox("Department",["All",*DISCIPLINES],key="availability_department")
+        employee_search=b.text_input("Employee search",key="availability_employee_search")
+        availability_start=monday(c.date_input("Planning start",planning_start,key="availability_start"))
+        default_end=min(planning_end,availability_start+timedelta(weeks=11))
+        availability_end=d.date_input("Planning end",default_end,key="availability_end")
+        availability_weeks=week_starts(availability_start,availability_end) if availability_end>=availability_start else []
+        detail=resource_availability_matrix(availability_weeks)
+        if detail.empty: st.info("No resources match this availability period.")
+        else:
+            if employee_search: detail=detail[detail.Employee.str.contains(employee_search,case=False,na=False)]
+            if availability_department!="All":
+                detail=detail[detail.apply(lambda row: row["Home Department"]==availability_department or float(row["Department Contributions"].get(availability_department,0))>0,axis=1)]
+            identities=detail[["resource_id","Employee","Home Department","Weekly Hours"]].drop_duplicates()
+            current=detail[detail.week_start==availability_weeks[0].isoformat()] if availability_weeks else detail.iloc[0:0]
+            current_map=current.set_index("resource_id")["Availability"].to_dict()
+            matrix=identities.copy(); matrix["Current Assignment"]=matrix.resource_id.map(current_map).fillna("0")
+            for week in availability_weeks:
+                values=detail[detail.week_start==week.isoformat()].set_index("resource_id")["Availability"].to_dict()
+                matrix[week.strftime("%d %b")]=matrix.resource_id.map(values).fillna("0")
+            st.dataframe(matrix.drop(columns="resource_id"),hide_index=True,use_container_width=True)
+            st.caption("Cells show usable hours by contributing department (for example 20 RS / 20 GIS). Hours are never duplicated.")
+            with st.expander("Availability reductions and explanations"):
+                explanation=detail[(detail["Holiday Hours"]>0)|(detail["Unavailable Hours"]>0)|(detail["Other Reduction Hours"]>0)|(detail.Reasons!="")]
+                st.dataframe(explanation[["Employee","week_start","Holiday Hours","Unavailable Hours","Other Reduction Hours","Reasons"]],hide_index=True,use_container_width=True)
     with resources_tab:
-        resources=get_resources(); editor=prepare_date_columns_for_editor(resources,RESOURCE_DATE_COLUMNS) if not resources.empty else pd.DataFrame(columns=["person_name","department","weekly_hours","active_status"])
-        edited=st.data_editor(editor,num_rows="dynamic",hide_index=True,use_container_width=True,key="operational_resources")
-        if st.button("Save resources",disabled=not user,key="save_operational_resources"): save_resources(edited.to_dict("records"),user); refresh()
+        resources=get_resources()
+        if not resources.empty:
+            current_detail=resource_availability_matrix([monday(date.today())])
+            current_hours=current_detail.set_index("resource_id")["Availability"].to_dict() if not current_detail.empty else {}
+            roster=resources[["id","person_name","department","weekly_hours","active_status"]].copy()
+            roster["Current Availability"]=roster.id.map(current_hours).fillna("0")
+            roster=roster.rename(columns={"person_name":"Employee","department":"Home Department","weekly_hours":"Weekly Hours","active_status":"Active Status"})
+            st.dataframe(roster.drop(columns="id"),hide_index=True,use_container_width=True)
+        with st.expander("Edit detailed roster",expanded=False):
+            editor=prepare_date_columns_for_editor(resources,RESOURCE_DATE_COLUMNS) if not resources.empty else pd.DataFrame(columns=["person_name","department","weekly_hours","active_status"])
+            edited=st.data_editor(editor,num_rows="dynamic",hide_index=True,use_container_width=True,key="operational_resources")
+            if st.button("Save resources",disabled=not user,key="save_operational_resources"): save_resources(edited.to_dict("records"),user); refresh()
     with holidays_tab:
         upload=st.file_uploader("Approved holiday snapshot",type=["csv","xlsx","xls"],key="operational_holidays")
         if upload:

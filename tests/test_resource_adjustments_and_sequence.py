@@ -9,6 +9,7 @@ from app.services.mvp import (
     save_capacity_adjustment,
     save_projects,
     save_resources,
+    resource_availability_matrix,
     sequence_analysis,
     weekly_department_capacity,
 )
@@ -36,6 +37,10 @@ class ResourceAdjustmentAndSequenceTests(unittest.TestCase):
         self.assertEqual(cap["GIS"], 18.75)
         self.assertEqual(db.rows("SELECT department FROM mvp_resources WHERE id=?", (self.resource_id,))[0]["department"], "RS")
         self.assertEqual(db.rows("SELECT object_type FROM audit_log ORDER BY id DESC LIMIT 1")[0]["object_type"], "Resource capacity adjustment")
+        detail = resource_availability_matrix([date(2026, 9, 7)]).iloc[0]
+        self.assertEqual(detail["Availability"], "18.75 GIS / 18.75 RS")
+        self.assertEqual(sum(detail["Department Contributions"].values()), 37.5)
+        self.assertEqual(sum(cap), detail["Available Hours"])
 
     def test_holiday_and_unavailability_are_capped_and_overlap_validation_rejects_over_100_percent(self):
         db.execute("INSERT INTO holidays(resource_id,person_name,holiday_date,hours,source) VALUES (?,?,?,?,?)",
