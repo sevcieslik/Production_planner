@@ -7,7 +7,8 @@ import json
 import pandas as pd
 import app.data.db as db
 from app.services.mvp import (
-    allocation_timeline, apply_quick_allocation, create_escalation, get_issues,
+    allocation_timeline, apply_quick_allocation, clear_future_allocation, create_escalation, get_issues,
+    future_project_allocation, manager_plan,
     project_health, save_internal_activities, save_projects, save_resources,
     update_issue, capacity_balance,
 )
@@ -64,6 +65,25 @@ class OperationalPlanningTests(unittest.TestCase):
         self.assertEqual(len(db.rows("SELECT id FROM audit_log")),before)
         event=db.rows("SELECT * FROM audit_log WHERE action='Quick Allocation'")[0]
         self.assertEqual((json.loads(event["previous_value"]),json.loads(event["new_value"])),(0,10.0))
+
+    def test_replace_and_clear_future_preserve_history_and_ignore_visible_end(self):
+        apply_quick_allocation("P1","RS",[date(2026,8,24),date(2026,9,7),date(2026,12,7)],
+                               [5,20,30],"Planner","replace")
+        apply_quick_allocation("P1","RS",[date(2026,9,14)],[40],"Planner","replace_future",False,date(2026,9,1))
+        saved=db.rows("SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code='P1' AND department='RS' AND planned_hours>0 ORDER BY week_start")
+        self.assertEqual([(r["week_start"],r["planned_hours"]) for r in saved],[('2026-08-24',5.0),('2026-09-14',40.0)])
+        self.assertEqual(future_project_allocation("P1","RS",date(2026,9,1)),40)
+        clear_future_allocation("P1","RS",date(2026,9,1),"Planner")
+        self.assertEqual(db.rows("SELECT planned_hours FROM manager_weekly_plan WHERE week_start='2026-08-24'")[0]["planned_hours"],5)
+        self.assertEqual(future_project_allocation("P1","RS",date(2026,9,1)),0)
+        self.assertTrue(db.rows("SELECT id FROM audit_log WHERE action='Future allocation cleared'"))
+
+    def test_unplanned_uses_all_future_allocation_not_visible_end_or_history(self):
+        apply_quick_allocation("P1","RS",[date(2026,8,24),date(2026,12,7)],[300,200],"Planner","replace",True)
+        plan=manager_plan([date(2026,9,7)],"RS")
+        self.assertEqual(plan.iloc[0]["Unplanned Hours"],300)
+        gantt=allocation_timeline([date(2026,9,7),date(2026,12,7)],"RS")
+        self.assertEqual(gantt.iloc[0]["Unplanned hours"],300)
 
 
 if __name__ == '__main__': unittest.main()

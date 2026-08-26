@@ -685,7 +685,11 @@ def manager_plan(weeks: list[date], department: str) -> pd.DataFrame:
             else:
                 value = 0.0
             row[key] = round(value, 2)
-        row["Unplanned Hours"] = round(max(row["Remaining Hours"] - sum(row[w.isoformat()] for w in weeks), 0), 2)
+        # Unplanned demand is deliberately independent of the visible end date.
+        # Only allocations before the operational planning start are historical.
+        row["Unplanned Hours"] = unplanned_hours(
+            row["Remaining Hours"], project["project_code"], department, weeks[0]
+        )
         output.append(row)
     frame = pd.DataFrame(output).sort_values(["Priority", "Required By", "Project Code"])
     # Keep the unresolved balance beside the project facts rather than beyond
@@ -750,10 +754,28 @@ def project_remaining_hours(project_code: str, department: str) -> float:
                      float(project[f"actual_{department.lower()}_hours"] or 0), 0), 2)
 
 
+def future_project_allocation(project_code: str, department: str, planning_start: date) -> float:
+    """Return authoritative manager allocation from planning start, with no end bound."""
+    start = planning_start - timedelta(days=planning_start.weekday())
+    result = rows("""SELECT COALESCE(SUM(planned_hours),0) AS hours
+                     FROM manager_weekly_plan
+                     WHERE project_code=? AND department=? AND week_start>=?""",
+                  (project_code, department, start.isoformat()))
+    return round(float(result[0]["hours"] or 0), 2)
+
+
+def unplanned_hours(remaining_hours: float, project_code: str, department: str,
+                    planning_start: date) -> float:
+    """Demand not covered by future manager allocation (planning end is not a limit)."""
+    return round(max(float(remaining_hours or 0) -
+                     future_project_allocation(project_code, department, planning_start), 0), 2)
+
+
 def apply_quick_allocation(project_code: str, department: str, weeks: list[date], values: list[float],
-                           user: str, operation: str = "add", allow_overallocation: bool = False) -> None:
+                           user: str, operation: str = "add", allow_overallocation: bool = False,
+                           planning_start: date | None = None) -> None:
     """Add to or replace only one project's selected manager-plan cells."""
-    if len(weeks) != len(values) or operation not in {"add", "replace"}:
+    if len(weeks) != len(values) or operation not in {"add", "replace", "replace_future"}:
         raise ValueError("Invalid allocation request.")
     remaining = project_remaining_hours(project_code, department)
     with connect() as conn:
@@ -763,12 +785,29 @@ def apply_quick_allocation(project_code: str, department: str, weeks: list[date]
         selected = {r["week_start"]: float(r["planned_hours"]) for r in conn.execute(
             "SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=?",
             (project_code, department)).fetchall()}
-        selected_old = sum(selected.get(w.isoformat(), 0) for w in weeks)
+        planning_start = (planning_start or min(weeks))
+        planning_start = planning_start - timedelta(days=planning_start.weekday())
+        future_existing = sum(v for key, v in selected.items() if key >= planning_start.isoformat())
+        selected_old = (sum(v for key, v in selected.items() if key >= planning_start.isoformat())
+                        if operation == "replace_future"
+                        else sum(selected.get(w.isoformat(), 0) for w in weeks))
         new_selected = sum((selected.get(w.isoformat(), 0) + max(float(v), 0)) if operation == "add"
                            else max(float(v), 0) for w, v in zip(weeks, values))
-        new_total = existing_total - selected_old + new_selected
+        new_total = ((new_selected if operation == "replace_future" else future_existing - selected_old + new_selected)
+                     if operation in {"add", "replace_future"} else existing_total - selected_old + new_selected)
         if new_total > remaining + 0.005 and not allow_overallocation:
             raise ValueError(f"Allocation would plan {new_total:.2f} h against {remaining:.2f} remaining hours. Confirm override to continue.")
+        if operation == "replace_future":
+            removed = [dict(r) for r in conn.execute(
+                "SELECT week_start,planned_hours FROM manager_weekly_plan WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0",
+                (project_code, department, planning_start.isoformat()))]
+            conn.execute("UPDATE manager_weekly_plan SET planned_hours=0,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0",
+                         (user, project_code, department, planning_start.isoformat()))
+            if removed:
+                _audit(conn, user, "Full future allocation replaced", "Weekly allocation", project_code,
+                       project_code=project_code, department=department, old=removed, new=[],
+                       details=f"Removed {sum(r['planned_hours'] for r in removed):g} h from {planning_start.isoformat()} before replacement")
+            selected = {key: value for key, value in selected.items() if key < planning_start.isoformat()}
         for week, value in zip(weeks, values):
             old = selected.get(week.isoformat(), 0)
             hours = old + max(float(value), 0) if operation == "add" else max(float(value), 0)
@@ -779,7 +818,7 @@ def apply_quick_allocation(project_code: str, department: str, weeks: list[date]
             if abs(old - hours) > 0.005:
                 _audit(conn, user, "Quick Allocation", "Weekly allocation", project_code,
                        project_code=project_code, department=department, field_name=week.isoformat(),
-                       old=old, new=round(hours, 2), details=f"{operation.title()} · {week.isoformat()}: {old:g} h → {hours:g} h")
+                       old=old, new=round(hours, 2), details=f"{operation.replace('_', ' ').title()} · {week.isoformat()}: {old:g} h → {hours:g} h")
         increment_data_version(conn)
 
 
@@ -790,8 +829,9 @@ def clear_future_allocation(project_code: str, department: str, from_week: date,
         cur = conn.execute("UPDATE manager_weekly_plan SET planned_hours=0,updated_by=?,updated_at=CURRENT_TIMESTAMP "
                            "WHERE project_code=? AND department=? AND week_start>=? AND planned_hours<>0",
                            (user, project_code, department, from_week.isoformat()))
-        if old:
-            _audit(conn,user,"Future allocation cleared","Weekly allocation",project_code,project_code=project_code,department=department,old=old,new=[],details=f"Cleared {len(old)} weeks from {from_week.isoformat()} ({sum(r['planned_hours'] for r in old):g} h)")
+        _audit(conn,user,"Future allocation cleared","Weekly allocation",project_code,
+               project_code=project_code,department=department,old=old,new=[],
+               details=f"Cleared {len(old)} weeks from {from_week.isoformat()} ({sum(r['planned_hours'] for r in old):g} h)")
         increment_data_version(conn)
         return cur.rowcount
 
@@ -1351,80 +1391,77 @@ def resource_active_for_week(resource: dict, week: date) -> bool:
     return not ((pd.isna(start) or start <= we) and (pd.isna(end) or end >= ws))
 
 
-def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
+def resource_availability_matrix(weeks: list[date]) -> pd.DataFrame:
+    """Calculate employee availability and departmental contributions in one batched pass."""
     ensure_mvp_schema()
-
-    # Capacity is reduced only by recorded absence. Do not conceal capacity behind
-    # an unexplained utilisation factor.
-    factor = 1.0
     resources = rows("SELECT * FROM mvp_resources")
     adjustments = rows("SELECT * FROM resource_capacity_adjustments WHERE active=1")
+    assignments = rows("SELECT * FROM resource_department_assignments")
     holiday_rows = rows("SELECT resource_id, holiday_date, SUM(hours) hours FROM holidays "
                         "WHERE COALESCE(status,'active')='active' GROUP BY resource_id,holiday_date")
-    holiday_by_resource_week: dict[tuple[int, str], float] = defaultdict(float)
+    holiday_by_resource_day: dict[tuple[int, str], float] = defaultdict(float)
     for h in holiday_rows:
-        holiday_date = pd.to_datetime(h["holiday_date"], errors="coerce")
-        if not pd.isna(holiday_date):
-            day = holiday_date.date()
-            week_key = (day - timedelta(days=day.weekday())).isoformat()
-            holiday_by_resource_week[(h["resource_id"], week_key)] += float(h["hours"] or 0)
-    out = []
+        parsed = pd.to_datetime(h["holiday_date"], errors="coerce")
+        if not pd.isna(parsed): holiday_by_resource_day[(h["resource_id"], parsed.date().isoformat())] += float(h["hours"] or 0)
 
     adjustments_by_resource: dict[int, list[dict]] = defaultdict(list)
     for adjustment in adjustments:
         adjustments_by_resource[adjustment["resource_id"]].append(dict(adjustment))
-
-    for w in weeks:
-        totals = {d: 0.0 for d in DISCIPLINES}
-
-        for r in resources:
-            if not resource_active_for_week(r, w):
-                continue
-
-            dept = department_for_resource(r["id"], r["department"], w)
-            weekly_hours = max(float(r["weekly_hours"] or 0), 0)
-            daily_baseline = weekly_hours / 5
-            holiday_hours = holiday_by_resource_week.get((r["id"], w.isoformat()), 0.0)
-            # Calculate by working day so partial-week assignments are represented
-            # without creating capacity, and overlapping reductions share a cap.
-            source_capacity = 0.0
-            moved = defaultdict(float)
-            active_adjustments = adjustments_by_resource.get(r["id"], [])
+    assignments_by_resource: dict[int, list[dict]] = defaultdict(list)
+    for assignment in assignments: assignments_by_resource[assignment["resource_id"]].append(dict(assignment))
+    out=[]
+    for raw_resource in resources:
+        r=dict(raw_resource)
+        weekly_hours=max(float(r["weekly_hours"] or 0),0); daily_baseline=weekly_hours/5
+        for w in weeks:
+            contributions=defaultdict(float); holiday_total=unavailable_total=reduction_total=0.0; reasons=[]
             for day_index in range(5):
-                day = w + timedelta(days=day_index)
-                day_available = daily_baseline
-                day_holiday = min(holiday_hours, day_available)
-                holiday_hours -= day_holiday
-                day_available -= day_holiday
-                applicable = [a for a in active_adjustments
-                              if _parse_date(a["start_date"]) <= day <= _parse_date(a["end_date"])]
-                requests = []
+                day=w+timedelta(days=day_index)
+                current_department=r["department"]
+                for assignment in assignments_by_resource.get(r["id"],[]):
+                    if _parse_date(assignment["start_date"]) <= day and (not assignment["end_date"] or day <= _parse_date(assignment["end_date"])):
+                        current_department=assignment["department"]
+                status=str(r.get("active_status") or "active")
+                status_start=_parse_date(r.get("status_start_date")); status_end=_parse_date(r.get("status_end_date"))
+                unavailable=status != "active" and (not status_start or day >= status_start) and (not status_end or day <= status_end)
+                if unavailable:
+                    unavailable_total += daily_baseline
+                    continue
+                available=daily_baseline
+                holiday=min(holiday_by_resource_day.get((r["id"],day.isoformat()),0),available)
+                holiday_total+=holiday; available-=holiday
+                applicable=[a for a in adjustments_by_resource.get(r["id"],[]) if _parse_date(a["start_date"])<=day<=_parse_date(a["end_date"])]
+                requests=[]
                 for adjustment in applicable:
-                    requested = (weekly_hours * float(adjustment["capacity_percent"]) / 100 / 5
-                                 if adjustment["capacity_percent"] is not None
-                                 else float(adjustment["hours_per_week"] or 0) / 5)
-                    requests.append((adjustment, max(requested, 0)))
-                requested_total = sum(value for _, value in requests)
-                scale = min(1.0, day_available / requested_total) if requested_total else 1.0
-                for adjustment, requested in requests:
-                    amount = requested * scale
+                    requested=(weekly_hours*float(adjustment["capacity_percent"])/100/5 if adjustment["capacity_percent"] is not None else float(adjustment["hours_per_week"] or 0)/5)
+                    requests.append((adjustment,max(requested,0)))
+                    if adjustment.get("reason"): reasons.append(str(adjustment["reason"]))
+                requested_total=sum(amount for _,amount in requests); scale=min(1.0,available/requested_total) if requested_total else 1.0
+                moved=0.0
+                for adjustment,requested in requests:
+                    amount=requested*scale
                     if adjustment["destination_department"]:
-                        moved[adjustment["destination_department"]] += amount
-                source_capacity += max(day_available - min(requested_total, day_available), 0)
-            totals[dept] += source_capacity
-            for destination, amount in moved.items():
-                totals[destination] += amount
-
-        for d, h in totals.items():
-            out.append(
-                {
-                    "week_start": w.isoformat(),
-                    "department": d,
-                    "available_capacity": round(h * factor, 2),
-                }
-            )
-
+                        contributions[adjustment["destination_department"]]+=amount; moved+=amount
+                    else: reduction_total+=amount
+                contributions[current_department]+=max(available-min(requested_total,available),0)
+            assignment_parts=[f"{hours:g} {dept}" for dept,hours in contributions.items() if hours>0.005]
+            out.append({"resource_id":r["id"],"Employee":r["person_name"],"Home Department":r["department"],
+                        "Weekly Hours":weekly_hours,"week_start":w.isoformat(),"Available Hours":round(sum(contributions.values()),2),
+                        "Department Contributions":dict(contributions),"Availability": " / ".join(assignment_parts) if assignment_parts else "0",
+                        "Holiday Hours":round(holiday_total,2),"Unavailable Hours":round(unavailable_total,2),
+                        "Other Reduction Hours":round(reduction_total,2),"Reasons":", ".join(sorted(set(reasons)))})
     return pd.DataFrame(out)
+
+
+def weekly_department_capacity(weeks: list[date]) -> pd.DataFrame:
+    """Aggregate the same employee-level engine used by Resource Management."""
+    detail=resource_availability_matrix(weeks); totals=[]
+    for week in weeks:
+        week_rows=detail[detail.week_start==week.isoformat()] if not detail.empty else pd.DataFrame()
+        for department in DISCIPLINES:
+            hours=sum(float(row.get("Department Contributions",{}).get(department,0)) for row in week_rows.to_dict("records"))
+            totals.append({"week_start":week.isoformat(),"department":department,"available_capacity":round(hours,2)})
+    return pd.DataFrame(totals)
 
 
 def get_capacity_adjustments(include_inactive: bool = True) -> pd.DataFrame:
@@ -1773,6 +1810,7 @@ def project_health(remaining_hours: float, allocated_before_deadline: float,
 def project_health_plans(as_of: date | None = None, department: str | None = None) -> pd.DataFrame:
     """Derive one explainable status per active project/discipline in bulk."""
     as_of = as_of or date.today()
+    as_of = as_of - timedelta(days=as_of.weekday())
     projects = get_projects(False)
     allocations = pd.DataFrame(rows("SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan WHERE planned_hours>0 AND week_start>=?", (as_of.isoformat(),)))
     output=[]
@@ -1784,9 +1822,12 @@ def project_health_plans(as_of: date | None = None, department: str | None = Non
             deadline=str(p.get("end_date") or "")
             before=sub[sub.week_start <= deadline] if not sub.empty else sub
             allocated=float(before.planned_hours.sum()) if not before.empty else 0.0
+            future_allocated=float(sub.planned_hours.sum()) if not sub.empty else 0.0
             first=str(sub.week_start.min()) if not sub.empty else None; last=str(sub.week_start.max()) if not sub.empty else None
             output.append({"Project Code":p["project_code"],"Project":p["project_name"],"Department":disc,
                            "Health":project_health(remaining,allocated),"Remaining Hours":round(remaining,2),
+                           "Unplanned Hours":round(max(remaining-future_allocated,0),2),
+                           "Future Allocated Hours":round(future_allocated,2),
                            "Allocated before deadline":round(allocated,2),"Shortfall / surplus":round(allocated-remaining,2),
                            "Required By":deadline,"Data Available":p.get(f"{disc.lower()}_start_date"),
                            "First planned week":first,"Last planned week":last})
@@ -1795,7 +1836,9 @@ def project_health_plans(as_of: date | None = None, department: str | None = Non
 
 def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.DataFrame:
     """Timeline periods derived first from explicit manager allocation, with labelled baseline fallback."""
-    projects = get_projects(False); allocations = manager_allocations(weeks); out=[]
+    projects = get_projects(False)
+    allocations = pd.DataFrame(rows("SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan WHERE planned_hours>0"))
+    out=[]
     if projects.empty:
         return pd.DataFrame()
     for p in projects.to_dict("records"):
@@ -1805,18 +1848,20 @@ def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.
             explicit = not sub.empty
             if explicit:
                 start = pd.to_datetime(sub.week_start).min().date(); end = pd.to_datetime(sub.week_start).max().date() + timedelta(days=6)
-                allocated = float(sub.planned_hours.sum())
+                future_sub=sub[sub.week_start>=weeks[0].isoformat()]
+                allocated = float(future_sub.planned_hours.sum())
             else:
                 start = _parse_date(p.get(f"{disc.lower()}_start_date") or p.get("start_date")); end = _parse_date(p.get("end_date")); allocated = 0.0
-            if not start or not end or end < weeks[0] or start > weeks[-1] + timedelta(days=6): continue
+            visible_start, visible_end = weeks[0], weeks[-1] + timedelta(days=6)
+            if not start or not end or end < visible_start or start > visible_end: continue
             remaining = max(float(p.get(f"{disc.lower()}_hours") or 0) - float(p.get(f"actual_{disc.lower()}_hours") or 0), 0)
-            deadline_allocated = float(sub[sub.week_start <= str(p.get("end_date"))].planned_hours.sum()) if not sub.empty else 0.0
+            deadline_allocated = float(sub[(sub.week_start>=weeks[0].isoformat()) & (sub.week_start <= str(p.get("end_date")))].planned_hours.sum()) if not sub.empty else 0.0
             health = project_health(remaining, deadline_allocated)
             out.append({"Project": project_timeline_label(p), "project_code": p["project_code"], "Discipline": disc,
-                        "Start": max(start, weeks[0]), "End": min(end, weeks[-1] + timedelta(days=6)),
+                        "Start": max(start, visible_start), "End": min(end, visible_end),
                         "Plan source": "Manager allocation" if explicit else "Forecast baseline",
                         "Remaining hours": remaining, "Allocated hours": allocated,
-                        "Unplanned hours": max(remaining - allocated, 0), "Data available": p.get(f"{disc.lower()}_start_date"),
+                        "Unplanned hours": unplanned_hours(remaining, p["project_code"], disc, weeks[0]), "Data available": p.get(f"{disc.lower()}_start_date"),
                         "Required by": p.get("end_date"), "Health status": health,
                         "Shortfall / surplus": round(deadline_allocated-remaining,2),
                         "Late": bool(explicit and end > _parse_date(p.get("end_date")))})
