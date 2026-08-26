@@ -19,13 +19,99 @@ from app.services.mvp import (
     parse_audit_timestamps,
     TEMPORARY_ADJUSTMENT_TYPES, get_capacity_adjustments, save_capacity_adjustment,
     sequence_analysis, future_project_allocation, resource_availability_matrix,
+    manager_allocations,
 )
 from app.services.setup_transfer import (
     apply_planner_setup, apply_project_import, export_planner_setup,
     export_projects_csv, preview_planner_setup, preview_project_import,
 )
+from app.ui.visuals import (
+    AVAILABILITY_COLOURS, CAPACITY_COLOURS, DEPARTMENT_COLOURS,
+    DEPARTMENT_TINTS, HEALTH_COLOURS, INTERNAL_ACTIVITY_COLOUR,
+    availability_label, availability_style, project_colour, style_planning_table,
+)
 
 st.set_page_config(page_title="Production Capacity Planner", layout="wide")
+
+
+def render_visual_legend() -> None:
+    """Small shared legend; labels ensure colour is never the only signal."""
+    items = [(d, DEPARTMENT_TINTS[d], DEPARTMENT_COLOURS[d]) for d in DISCIPLINES]
+    items += [
+        ("Partial", *AVAILABILITY_COLOURS["partial"]),
+        ("Unavailable", *AVAILABILITY_COLOURS["unavailable"]),
+        ("Temporary reassignment (→)", *AVAILABILITY_COLOURS["temporary"]),
+    ]
+    html = " ".join(
+        f'<span style="display:inline-block;padding:3px 9px;margin:2px;border-radius:12px;'
+        f'background:{bg};color:{fg};font-size:.82rem;font-weight:600">{label}</span>'
+        for label, bg, fg in items
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_capacity_chart(balance: pd.DataFrame, department: str) -> None:
+    """Explicit manager allocations and internal work as stacks, capacity as a line."""
+    filtered_balance = balance if department == "All" else balance[balance.department == department]
+    summary = filtered_balance.groupby("week_start", as_index=False).agg(
+        **{"Available Capacity": ("available_capacity", "sum"),
+           "Total Planned": ("total_allocated", "sum")}
+    )
+    summary["Week"] = pd.to_datetime(summary.week_start)
+    summary["Balance"] = summary["Available Capacity"] - summary["Total Planned"]
+    summary["Capacity position"] = summary.Balance.apply(
+        lambda value: f"Spare: {value:,.1f} h" if value >= 0 else f"Shortage: {abs(value):,.1f} h"
+    )
+
+    allocations = manager_allocations(weeks)
+    if department != "All" and not allocations.empty:
+        allocations = allocations[allocations.department == department]
+    projects = get_projects(False)
+    metadata = projects[["project_code", "project_name", "priority"]] if not projects.empty else pd.DataFrame()
+    stacks = allocations.merge(metadata, on="project_code", how="left") if not allocations.empty else pd.DataFrame()
+    if not stacks.empty:
+        stacks = stacks.rename(columns={"project_code": "Project Code", "project_name": "Project Name",
+                                        "priority": "Priority", "planned_hours": "Allocated Hours", "department": "Department"})
+        stacks["Series"] = stacks["Project Code"]
+        stacks["Detail"] = stacks["Project Code"] + " · " + stacks["Project Name"].fillna("")
+    activities = get_internal_activities()
+    activity_rows = []
+    if not activities.empty:
+        activities = activities[activities.active.astype(bool)]
+        if department != "All": activities = activities[activities.department == department]
+        for activity in activities.itertuples():
+            for week in weeks:
+                if activity.start_week <= week.isoformat() <= activity.end_week and float(activity.planned_hours_per_week) > 0:
+                    activity_rows.append({"week_start": week.isoformat(), "Department": activity.department,
+                        "Project Code": "Internal", "Project Name": activity.activity_name, "Priority": "—",
+                        "Allocated Hours": float(activity.planned_hours_per_week), "Series": "Internal Activities",
+                        "Detail": f"Internal · {activity.activity_name}"})
+    stacks = pd.concat([stacks, pd.DataFrame(activity_rows)], ignore_index=True)
+    if stacks.empty:
+        st.info("No explicit manager allocation or internal activity in this period.")
+        return
+    stacks = stacks.merge(summary[["week_start", "Available Capacity", "Total Planned", "Balance", "Capacity position"]], on="week_start", how="left")
+    stacks["Week"] = pd.to_datetime(stacks.week_start)
+    domain = stacks.Series.drop_duplicates().tolist()
+    colours = [INTERNAL_ACTIVITY_COLOUR if item == "Internal Activities" else project_colour(item) for item in domain]
+    tooltips = [alt.Tooltip("Week:T", title="Week"), "Available Capacity:Q", "Total Planned:Q",
+                alt.Tooltip("Capacity position:N"), "Department:N", "Project Code:N", "Project Name:N",
+                "Allocated Hours:Q", "Priority:N"]
+    bars = alt.Chart(stacks).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
+        x=alt.X("Week:T", title="Week", timeUnit="yearmonthdate"), y=alt.Y("Allocated Hours:Q", title="Hours"),
+        color=alt.Color("Series:N", scale=alt.Scale(domain=domain, range=colours), title="Project / activity"),
+        order=alt.Order("Series:N"), tooltip=tooltips,
+    )
+    line = alt.Chart(summary).mark_line(color=CAPACITY_COLOURS["within"], strokeWidth=3, point=True).encode(
+        x=alt.X("Week:T", timeUnit="yearmonthdate"), y=alt.Y("Available Capacity:Q"),
+        tooltip=[alt.Tooltip("Week:T", title="Week"), "Available Capacity:Q", "Total Planned:Q", "Capacity position:N"],
+    )
+    overload = summary[summary.Balance < 0]
+    markers = alt.Chart(overload).mark_point(shape="triangle-up", size=90, filled=True, color=CAPACITY_COLOURS["shortage"]).encode(
+        x=alt.X("Week:T", timeUnit="yearmonthdate"), y=alt.Y("Total Planned:Q"),
+        tooltip=[alt.Tooltip("Week:T", title="Overloaded week"), "Capacity position:N"])
+    st.altair_chart(alt.layer(bars, line, markers).resolve_scale(y="shared").properties(height=390), use_container_width=True)
+    st.caption("Stack = explicit manager allocation plus Internal Activities. Dark line = Available Capacity. Red triangle = shortage.")
 
 
 def record_access_event(identity: str, action: str) -> None:
@@ -160,7 +246,7 @@ def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: 
     )
     st.altair_chart(chart, use_container_width=True)
     st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
-    st.dataframe(gantt, hide_index=True, use_container_width=True)
+    st.dataframe(style_planning_table(gantt), hide_index=True, use_container_width=True)
 
 
 planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
@@ -311,9 +397,13 @@ def planning_view() -> None:
         counts=health.Health.value_counts() if not health.empty else pd.Series(dtype=int)
         cols=st.columns(4)
         for col,label in zip(cols,["Unplanned","Under-resourced","Well-resourced","Over-resourced"]): col.metric(label,int(counts.get(label,0)))
-        chart=selected.groupby("week_start",as_index=False)[["available_capacity","total_allocated","over_under_capacity"]].sum(); chart["week_start"]=pd.to_datetime(chart.week_start)
-        st.line_chart(chart.set_index("week_start")); st.caption("Available capacity = contracted roster − approved absence − temporary unavailability, with temporary assignments moved between departments. Balance = available capacity − project allocations − internal activities.")
-        if not health.empty: st.dataframe(health,hide_index=True,use_container_width=True)
+        render_capacity_chart(bal, department)
+        st.caption("Available capacity = contracted roster − approved absence − temporary unavailability, with temporary assignments moved between departments. Balance remains available capacity − project allocations − internal activities.")
+        if department == "All" and not shortage.empty:
+            affected = shortage.groupby("department").size().to_dict()
+            st.warning("The combined view can mask a department shortage with spare capacity elsewhere. " +
+                       "; ".join(f"{disc}: {affected.get(disc, 0)} shortage week(s)" for disc in DISCIPLINES))
+        if not health.empty: st.dataframe(style_planning_table(health),hide_index=True,use_container_width=True)
     with gantt_tab:
         gantt=allocation_timeline(weeks,department)
         if gantt.empty: st.info("No allocation or forecast baseline in this range.")
@@ -327,7 +417,7 @@ def planning_view() -> None:
         else:
             counts=findings.Category.value_counts(); cols=st.columns(4)
             for col,label in zip(cols,["Gap","Possible overlap","Downstream starvation","Pull-forward opportunity"]): col.metric(label,int(counts.get(label,0)))
-            st.dataframe(findings,hide_index=True,use_container_width=True)
+            st.dataframe(style_planning_table(findings),hide_index=True,use_container_width=True)
     with weekly:
         def show_department(d: str, editable: bool=False):
             st.subheader(d)
@@ -342,10 +432,13 @@ def planning_view() -> None:
                 if st.button("Save manager plan",disabled=not user,key=f"save_{d}"):
                     try: save_manager_plan(edited,weeks,d,user); refresh()
                     except ValueError as exc: st.error(str(exc))
-            else: st.dataframe(display,hide_index=True,use_container_width=True)
+            else: st.dataframe(style_planning_table(display),hide_index=True,use_container_width=True)
             d_bal=bal[bal.department==d].set_index("week_start")
             totals=pd.DataFrame([{ "Summary":f"{d} Allocated",**{w:float(d_bal.loc[w,"allocated_demand"]) for w in week_cols}}, {"Summary":f"{d} Capacity",**{w:float(d_bal.loc[w,"available_capacity"]) for w in week_cols}}, {"Summary":f"{d} Balance",**{w:float(d_bal.loc[w,"over_under_capacity"]) for w in week_cols}}])
-            st.dataframe(totals,hide_index=True,use_container_width=True)
+            def balance_style(row):
+                is_balance = str(row.get("Summary", "")).endswith("Balance")
+                return ["background-color:#FDE8E7;color:#A52622;font-weight:700" if is_balance and isinstance(value,(int,float)) and value < 0 else "" for value in row]
+            st.dataframe(totals.style.apply(balance_style,axis=1).format(precision=1),hide_index=True,use_container_width=True)
             activities=get_internal_activities(); activities=activities[(activities.department==d)&(activities.active.astype(bool))] if not activities.empty else activities
             if not activities.empty:
                 internal=[]
@@ -397,13 +490,24 @@ def resource_management_view() -> None:
                 detail=detail[detail.apply(lambda row: row["Home Department"]==availability_department or float(row["Department Contributions"].get(availability_department,0))>0,axis=1)]
             identities=detail[["resource_id","Employee","Home Department","Weekly Hours"]].drop_duplicates()
             current=detail[detail.week_start==availability_weeks[0].isoformat()] if availability_weeks else detail.iloc[0:0]
-            current_map=current.set_index("resource_id")["Availability"].to_dict()
+            current_map={r.resource_id:availability_label(r["Home Department"],r["Department Contributions"]) for _,r in current.iterrows()}
             matrix=identities.copy(); matrix["Current Assignment"]=matrix.resource_id.map(current_map).fillna("0")
+            style_matrix=pd.DataFrame("",index=matrix.index,columns=matrix.columns)
             for week in availability_weeks:
-                values=detail[detail.week_start==week.isoformat()].set_index("resource_id")["Availability"].to_dict()
-                matrix[week.strftime("%d %b")]=matrix.resource_id.map(values).fillna("0")
-            st.dataframe(matrix.drop(columns="resource_id"),hide_index=True,use_container_width=True)
-            st.caption("Cells show usable hours by contributing department (for example 20 RS / 20 GIS). Hours are never duplicated.")
+                week_rows=detail[detail.week_start==week.isoformat()].set_index("resource_id")
+                labels={rid:availability_label(row["Home Department"],row["Department Contributions"]) for rid,row in week_rows.iterrows()}
+                column=week.strftime("%d %b"); matrix[column]=matrix.resource_id.map(labels).fillna("0 · Unavailable")
+                style_matrix[column]=matrix.apply(lambda row: availability_style(
+                    row["Home Department"],row["Weekly Hours"],
+                    week_rows.loc[row.resource_id,"Department Contributions"] if row.resource_id in week_rows.index else {}),axis=1)
+            if availability_weeks:
+                first_column=availability_weeks[0].strftime("%d %b")
+                style_matrix["Current Assignment"]=style_matrix[first_column]
+            shown=matrix.drop(columns="resource_id"); shown_styles=style_matrix[shown.columns]
+            styled=shown.style.apply(lambda _frame: shown_styles,axis=None)
+            st.dataframe(styled,hide_index=True,use_container_width=True)
+            render_visual_legend()
+            st.caption("Cells show usable hours by contributing department. An arrow marks capacity moved from the home department; split hours are shown once and are never duplicated.")
             with st.expander("Availability reductions and explanations"):
                 explanation=detail[(detail["Holiday Hours"]>0)|(detail["Unavailable Hours"]>0)|(detail["Other Reduction Hours"]>0)|(detail.Reasons!="")]
                 st.dataframe(explanation[["Employee","week_start","Holiday Hours","Unavailable Hours","Other Reduction Hours","Reasons"]],hide_index=True,use_container_width=True)
