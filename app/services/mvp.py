@@ -12,7 +12,7 @@ from collections import defaultdict
 import pandas as pd
 
 from app.data.db import connect, execute, rows
-from app.services.planning import capacity_status, spread_hours, week_starts
+from app.services.planning import CAPACITY_RISK_UTILISATION, capacity_status, spread_hours, week_starts
 
 DISCIPLINES = ["RS", "GIS", "PLS"]
 TEMPORARY_ADJUSTMENT_TYPES = [
@@ -21,6 +21,14 @@ TEMPORARY_ADJUSTMENT_TYPES = [
 ]
 SEQUENCE_GAP_THRESHOLD_DAYS = 7
 PROJECT_HEALTH_TOLERANCE_HOURS = 0.5
+ALLOCATION_FUTURE_HORIZON_WEEKS = 78
+
+CAPACITY_STATUS_LABELS = {
+    "green": "Within capacity",
+    "amber": "Capacity risk",
+    "red": "Over capacity",
+    "grey": "Within capacity",
+}
 LOADING_TYPES = ["even", "front_loaded", "back_loaded", "manual"]
 RESOURCE_STATUSES = [
     "active",
@@ -1627,12 +1635,12 @@ def gantt_capacity_status(department: str, start_date: date, end_date: date, bal
     if bal.empty or not {"week_start", "department", "available_capacity", "allocated_demand"}.issubset(bal.columns):
         return "grey"
     sub = bal[(bal["department"] == department) & (pd.to_datetime(bal["week_start"]).dt.date >= (start_date - timedelta(days=start_date.weekday()))) & (pd.to_datetime(bal["week_start"]).dt.date <= end_date)]
-    if sub.empty or float(sub["available_capacity"].sum() or 0) <= 0:
-        return "grey"
     if (sub["allocated_demand"] > sub["available_capacity"]).any():
         return "red"
+    if sub.empty or float(sub["available_capacity"].sum() or 0) <= 0:
+        return "grey"
     utilisation = float(sub["allocated_demand"].sum() or 0) / float(sub["available_capacity"].sum() or 1)
-    if utilisation >= 0.85:
+    if utilisation >= CAPACITY_RISK_UTILISATION:
         return "amber"
     return "green"
 
@@ -1834,6 +1842,58 @@ def project_health_plans(as_of: date | None = None, department: str | None = Non
     return pd.DataFrame(output)
 
 
+def project_capacity_statuses(health: pd.DataFrame, balance: pd.DataFrame,
+                              visible_start: date, visible_end: date) -> pd.DataFrame:
+    """Attach shared departmental capacity conditions to project rows.
+
+    Attribution means only that the project has a positive manager allocation in
+    an affected department/week; it never claims that the project caused the
+    combined shortage.  ``balance`` is the authoritative capacity_balance result
+    already used by the chart.
+    """
+    result = health.copy()
+    empty_defaults = {
+        "Capacity Status": "Within capacity", "Over-capacity weeks": 0,
+        "Peak departmental shortage": 0.0, "First affected week": None,
+    }
+    if result.empty:
+        for name in empty_defaults: result[name] = pd.Series(dtype=object)
+        return result
+    for name, value in empty_defaults.items(): result[name] = value
+    if balance.empty:
+        return result
+    boundary_start = monday_date(visible_start).isoformat()
+    boundary_end = monday_date(visible_end).isoformat()
+    allocations = pd.DataFrame(rows(
+        "SELECT project_code,department,week_start,planned_hours FROM manager_weekly_plan "
+        "WHERE planned_hours>0 AND week_start BETWEEN ? AND ?",
+        (boundary_start, boundary_end),
+    ))
+    if allocations.empty:
+        return result
+    positions = balance.copy()
+    positions["Capacity Status"] = positions["status"].map(CAPACITY_STATUS_LABELS).fillna("Within capacity")
+    positions["shortage"] = (-positions["over_under_capacity"]).clip(lower=0)
+    joined = allocations.merge(
+        positions[["department", "week_start", "Capacity Status", "shortage"]],
+        on=["department", "week_start"], how="left",
+    )
+    rank = {"Within capacity": 0, "Capacity risk": 1, "Over capacity": 2}
+    for index, row in result.iterrows():
+        affected = joined[(joined.project_code == row["Project Code"]) &
+                          (joined.department == row["Department"])]
+        if affected.empty:
+            continue
+        statuses = affected["Capacity Status"].fillna("Within capacity")
+        result.at[index, "Capacity Status"] = max(statuses, key=lambda value: rank.get(value, 0))
+        over = affected[statuses == "Over capacity"]
+        if not over.empty:
+            result.at[index, "Over-capacity weeks"] = int(over.week_start.nunique())
+            result.at[index, "Peak departmental shortage"] = round(float(over.shortage.max()), 2)
+            result.at[index, "First affected week"] = str(over.week_start.min())
+    return result
+
+
 def allocation_timeline(weeks: list[date], department: str | None = None) -> pd.DataFrame:
     """Timeline periods derived first from explicit manager allocation, with labelled baseline fallback."""
     projects = get_projects(False)
@@ -1926,7 +1986,7 @@ def capacity_balance(weeks: list[date]) -> pd.DataFrame:
         lambda r: capacity_status(
             (r["total_allocated"] / r["available_capacity"])
             if r["available_capacity"]
-            else None,
+            else (float("inf") if r["total_allocated"] > 0 else None),
             r["available_capacity"],
         ),
         axis=1,

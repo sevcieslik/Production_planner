@@ -19,7 +19,7 @@ from app.services.mvp import (
     parse_audit_timestamps,
     TEMPORARY_ADJUSTMENT_TYPES, get_capacity_adjustments, save_capacity_adjustment,
     sequence_analysis, future_project_allocation, resource_availability_matrix,
-    manager_allocations,
+    manager_allocations, project_capacity_statuses, ALLOCATION_FUTURE_HORIZON_WEEKS,
 )
 from app.services.setup_transfer import (
     apply_planner_setup, apply_project_import, export_planner_setup,
@@ -265,15 +265,23 @@ def allocation_dialog(default_department: str = "RS") -> None:
     project_code = labels[project_label]
     department = st.selectbox("Department", DISCIPLINES, index=DISCIPLINES.index(default_department))
     mode = st.segmented_control("Allocation method", ["People", "Hours/week", "Spread remaining"], default="People")
-    start_week = st.selectbox("Start week", weeks, format_func=lambda d: d.strftime("%d %b %Y"))
+    # Allocation dates are deliberately independent of the visible planning end.
+    replace_clear_boundary = monday(planning_start)
+    allocation_week_options = [replace_clear_boundary + timedelta(weeks=i)
+                               for i in range(ALLOCATION_FUTURE_HORIZON_WEEKS + 1)]
+    start_week = st.selectbox("Allocation start week", allocation_week_options,
+                              format_func=lambda d: d.strftime("%d %b %Y"),
+                              help=f"May be outside the visible Planning range (up to {ALLOCATION_FUTURE_HORIZON_WEEKS} weeks ahead).")
     selected_weeks: list[date]
     people = hours_person = hours_week = 0.0
     if mode == "Spread remaining":
-        end_options = [w for w in weeks if w >= start_week]
-        end_week = st.selectbox("End week", end_options, index=len(end_options) - 1, format_func=lambda d: d.strftime("%d %b %Y"))
-        selected_weeks = [w for w in weeks if start_week <= w <= end_week]
+        end_options = [w for w in allocation_week_options if w >= start_week]
+        default_end = min(3, len(end_options) - 1)
+        end_week = st.selectbox("Allocation end week", end_options, index=default_end,
+                                format_func=lambda d: d.strftime("%d %b %Y"))
+        selected_weeks = week_starts(start_week, end_week)
     else:
-        max_weeks = max(len([w for w in weeks if w >= start_week]), 1)
+        max_weeks = max(len([w for w in allocation_week_options if w >= start_week]), 1)
         count = st.number_input("Number of weeks", 1, max_weeks, min(4, max_weeks))
         selected_weeks = [start_week + timedelta(weeks=i) for i in range(int(count))]
         if mode == "People":
@@ -328,7 +336,13 @@ def allocation_dialog(default_department: str = "RS") -> None:
     if st.button("Apply allocation", type="primary", disabled=not user or (over and not override)):
         try:
             apply_quick_allocation(project_code, department, selected_weeks, values, user, operation, override, planning_start)
-            st.success("Weekly manager allocation updated.")
+            allocation_end = selected_weeks[-1]
+            outside_view = selected_weeks[0] < monday(planning_start) or allocation_end > monday(planning_end)
+            st.session_state["allocation_save_message"] = (
+                f"Allocation saved through {allocation_end:%d %b %Y}. "
+                + ("Some allocated weeks are outside the current Planning range. Extend the Planning view to see all allocated weeks."
+                   if outside_view else "All allocated weeks are inside the current Planning range.")
+            )
             refresh()
         except ValueError as exc: st.error(str(exc))
     st.divider()
@@ -379,9 +393,12 @@ def planning_view() -> None:
     st.header("Planning")
     if not weeks: st.error("Planning end must not be before planning start."); return
     department=st.segmented_control("Department",["All",*DISCIPLINES],default="All")
+    if st.session_state.get("allocation_save_message"):
+        st.success(st.session_state.pop("allocation_save_message"))
     overview,gantt_tab,sequence_tab,weekly,issues_tab=st.tabs(["Overview","Gantt","Sequence","Weekly allocation","Issues"])
     bal=capacity_balance(weeks); selected=bal if department=="All" else bal[bal.department==department]
     health=project_health_plans(planning_start,department)
+    health=project_capacity_statuses(health, selected, planning_start, planning_end)
     with overview:
         remaining=float(health["Remaining Hours"].sum()) if not health.empty else 0
         unplanned=float(health["Unplanned Hours"].sum()) if not health.empty else 0
@@ -392,7 +409,15 @@ def planning_view() -> None:
         metrics[2].metric("Unallocated capacity in period",f"{max(float(selected.over_under_capacity.sum()),0):,.1f} h")
         metrics[3].metric("Weeks over capacity",str(len(shortage))); metrics[4].metric("Peak weekly shortage",f"{abs(float(shortage.over_under_capacity.min())) if not shortage.empty else 0:,.1f} h")
         metrics[5].metric("Open issues",str(open_issues))
-        if not shortage.empty: st.caption("Earliest capacity gap: "+str(shortage.sort_values("week_start").iloc[0].week_start))
+        if not shortage.empty:
+            st.caption("Earliest capacity gap: "+str(shortage.sort_values("week_start").iloc[0].week_start))
+            well = health[(health["Health"] == "Well-resourced") &
+                          (health["Capacity Status"] == "Over capacity")] if not health.empty else pd.DataFrame()
+            for disc, gaps in shortage.groupby("department"):
+                affected_well = well[well["Department"] == disc]["Project Code"].nunique() if not well.empty else 0
+                peak = abs(float(gaps.over_under_capacity.min()))
+                st.error(f"{affected_well} project(s) are individually well-resourced, but {disc} exceeds available capacity "
+                         f"in {gaps.week_start.nunique()} week(s). Peak shortage: {peak:,.1f} h.")
         st.subheader("Project-discipline plan health")
         counts=health.Health.value_counts() if not health.empty else pd.Series(dtype=int)
         cols=st.columns(4)
@@ -423,8 +448,9 @@ def planning_view() -> None:
             st.subheader(d)
             plan=manager_plan(weeks,d); week_cols=[w.isoformat() for w in weeks]
             if plan.empty: st.info(f"No active {d} demand."); return
-            h=project_health_plans(planning_start,d)[["Project Code","Health"]]
-            plan=h.merge(plan,on="Project Code",how="right"); display=plan[["Health","Project Code","Project","Remaining Hours",*week_cols]]
+            h=project_capacity_statuses(project_health_plans(planning_start,d), bal[bal.department==d],
+                                        planning_start, planning_end)[["Project Code","Health","Capacity Status"]]
+            plan=h.merge(plan,on="Project Code",how="right"); display=plan[["Health","Capacity Status","Project Code","Project","Remaining Hours",*week_cols]]
             if editable:
                 if st.button("+ Allocate capacity",type="primary",key=f"allocate_{d}"): allocation_dialog(d)
                 disabled=[c for c in plan.columns if c not in week_cols]

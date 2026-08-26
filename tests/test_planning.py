@@ -7,6 +7,7 @@ from pathlib import Path
 
 import app.data.db as db
 from app.services.planning import (
+    CAPACITY_RISK_UTILISATION,
     build_loading_preview,
     effective_capacity_by_week,
     fit_hours_to_capacity,
@@ -16,6 +17,7 @@ from app.services.planning import (
     save_plan_and_regenerate_demand,
     spread_hours,
     week_starts,
+    capacity_status,
 )
 
 
@@ -80,6 +82,13 @@ class PlanningWorkflowTests(unittest.TestCase):
         preview = build_loading_preview(self.project_id, self.rs_id, [date(2026, 1, 5)], [40])
         self.assertEqual(preview[0]['status'], 'red')
         self.assertEqual(preview[0]['surplus_or_shortage'], -6.0)
+
+    def test_capacity_risk_uses_central_ninety_percent_threshold(self):
+        self.assertEqual(CAPACITY_RISK_UTILISATION, 0.90)
+        self.assertEqual(capacity_status(0.8999, 100), 'green')
+        self.assertEqual(capacity_status(0.90, 100), 'amber')
+        self.assertEqual(capacity_status(1.0, 100), 'amber')
+        self.assertEqual(capacity_status(1.0001, 100), 'red')
 
     def test_fit_to_capacity_behaviour(self):
         weeks = [date(2026, 1, 5), date(2026, 1, 12)]

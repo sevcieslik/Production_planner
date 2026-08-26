@@ -21,6 +21,11 @@ AVAILABILITY_COLOURS = {
     "temporary": ("#F1EAFB", "#62429B"),
 }
 CAPACITY_COLOURS = {"within": "#536471", "shortage": "#C43D3D"}
+CAPACITY_STATUS_COLOURS = {
+    "Within capacity": ("#EDF2F4", "#42515A"),
+    "Capacity risk": ("#FFF0D5", "#8A5200"),
+    "Over capacity": ("#FDE8E7", "#A52622"),
+}
 INTERNAL_ACTIVITY_COLOUR = "#8B9298"
 
 
@@ -39,6 +44,9 @@ def style_planning_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
     def cell(value: object, column: str) -> str:
         if column in {"Health", "Health status"} and str(value) in HEALTH_COLOURS:
             background, foreground = HEALTH_COLOURS[str(value)]
+            return f"background-color:{background};color:{foreground};font-weight:600"
+        if column == "Capacity Status" and str(value) in CAPACITY_STATUS_COLOURS:
+            background, foreground = CAPACITY_STATUS_COLOURS[str(value)]
             return f"background-color:{background};color:{foreground};font-weight:600"
         if column == "Unplanned Hours" and pd.notna(value) and float(value) > 0:
             return "background-color:#FDE8E7;color:#A52622;font-weight:700"

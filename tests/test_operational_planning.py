@@ -9,7 +9,8 @@ import app.data.db as db
 from app.services.mvp import (
     allocation_timeline, apply_quick_allocation, clear_future_allocation, create_escalation, get_issues,
     future_project_allocation, manager_plan,
-    project_health, save_internal_activities, save_projects, save_resources,
+    project_capacity_statuses, project_health, project_health_plans,
+    save_internal_activities, save_projects, save_resources,
     update_issue, capacity_balance,
 )
 
@@ -52,6 +53,22 @@ class OperationalPlanningTests(unittest.TestCase):
         save_internal_activities([{"activity_name":"Training","department":"RS","start_week":self.weeks[0],"end_week":self.weeks[0],"planned_hours_per_week":5,"active":True}],"Planner")
         row=capacity_balance([self.weeks[0]]).query("department == 'RS'").iloc[0]
         self.assertEqual(row.over_under_capacity,row.available_capacity-10-5)
+
+    def test_capacity_status_is_separate_from_well_resourced_health(self):
+        save_resources([{"person_name":"A","department":"RS","weekly_hours":40,"active_status":"active"}])
+        # Remaining RS demand is 500 h: the project is fully covered, while its
+        # two affected weeks include one normal week and one departmental conflict.
+        apply_quick_allocation("P1", "RS", self.weeks[:2], [465, 35], "Planner", "replace")
+        balance = capacity_balance(self.weeks[:2])
+        health = project_capacity_statuses(
+            project_health_plans(self.weeks[0], "RS"), balance, self.weeks[0], self.weeks[1]
+        )
+        row = health.iloc[0]
+        self.assertEqual(row["Health"], "Well-resourced")
+        self.assertEqual(row["Capacity Status"], "Over capacity")
+        self.assertEqual(row["Over-capacity weeks"], 1)
+        self.assertGreater(row["Peak departmental shortage"], 0)
+        self.assertEqual(row["First affected week"], "2026-09-07")
 
     def test_issue_lifecycle_and_audit_change_suppression(self):
         issue=create_escalation("P1","RS","Capacity shortage",20,"Choose coverage","Owner",date(2026,9,20),"Planner")
