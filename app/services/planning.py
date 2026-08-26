@@ -5,6 +5,10 @@ from app.data.db import rows, connect, write_audit
 LOADING_METHODS = ['Even spread', 'Front-loaded', 'Back-loaded', 'Manual weekly spread']
 DISCIPLINES = ['RS', 'GIS', 'PLS']
 
+# A week at or above this utilisation (without exceeding capacity) needs
+# attention.  This is the single threshold used by planning presentation.
+CAPACITY_RISK_UTILISATION = 0.90
+
 
 def monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
@@ -74,13 +78,13 @@ def manual_loading_difference(total: float, weekly_hours: list[float]) -> float:
 
 
 def capacity_status(utilisation: float | None, effective_capacity: float) -> str:
-    if effective_capacity <= 0:
+    if effective_capacity <= 0 and utilisation != float('inf'):
         return 'grey'
     if utilisation is None:
         return 'grey'
     if utilisation > 1:
         return 'red'
-    if utilisation >= 0.85:
+    if utilisation >= CAPACITY_RISK_UTILISATION:
         return 'amber'
     return 'green'
 
@@ -91,10 +95,10 @@ def build_loading_preview(project_id: int | None, discipline_id: int, weeks: lis
     preview=[]
     for w, proposed in zip(weeks, proposed_hours):
         key=w.isoformat(); cap=caps.get(key, 0.0); old=existing.get(key, 0.0); total=round(old + float(proposed), 2)
-        surplus=round(cap-total, 2); util=round(total/cap, 4) if cap > 0 else None
+        surplus=round(cap-total, 2); util=round(total/cap, 4) if cap > 0 else (float('inf') if total > 0 else None)
         preview.append({'week_start': key, 'available_effective_capacity': cap, 'already_allocated_project_demand': old,
                         'new_proposed_demand': round(float(proposed), 2), 'total_demand_after_loading': total,
-                        'surplus_or_shortage': surplus, 'utilisation_pct': round(util*100, 1) if util is not None else None,
+                        'surplus_or_shortage': surplus, 'utilisation_pct': round(util*100, 1) if util is not None and util != float('inf') else None,
                         'status': capacity_status(util, cap)})
     return preview
 
