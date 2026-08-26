@@ -95,6 +95,74 @@ def refresh() -> None:
     st.rerun()
 
 
+def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: date) -> None:
+    """Render the Gantt from its existing rows without changing allocation dates."""
+    chart_data = gantt.copy()
+    chart_data["Start"] = pd.to_datetime(chart_data["Start"], errors="coerce").dt.tz_localize(None)
+    chart_data["End"] = pd.to_datetime(chart_data["End"], errors="coerce").dt.tz_localize(None)
+    chart_data["Deadline"] = pd.to_datetime(chart_data["Required by"], errors="coerce").dt.tz_localize(None)
+
+    invalid_periods = int((chart_data["End"] <= chart_data["Start"]).fillna(False).sum())
+    diagnostics = {
+        "Start dtype": str(chart_data["Start"].dtype),
+        "End dtype": str(chart_data["End"].dtype),
+        "Minimum Start": chart_data["Start"].min(),
+        "Maximum End": chart_data["End"].max(),
+        "Rows": len(chart_data),
+        "Start nulls": int(chart_data["Start"].isna().sum()),
+        "End nulls": int(chart_data["End"].isna().sum()),
+        "Rows where End <= Start": invalid_periods,
+    }
+    with st.expander("Gantt rendering diagnostics"):
+        st.dataframe(pd.DataFrame([diagnostics]), hide_index=True, use_container_width=True)
+
+    # Start with the proven primitive: one temporal interval and one categorical row.
+    # The later encodings retain these same x/x2 channels and Vega-derived x scale.
+    chart_data["Row"] = chart_data["Project"] + "  ·  " + chart_data["Discipline"]
+    base_bars = alt.Chart(chart_data).mark_bar().encode(
+        x=alt.X("Start:T", title="Calendar date"),
+        x2="End:T",
+        y=alt.Y("Row:N", title="Project / department"),
+    )
+
+    # Clip only the displayed values. End is inclusive in the planning data, so the
+    # exclusive visual end is one day later and gives a one-day/one-week period width.
+    period_start = pd.Timestamp(planning_start)
+    period_end = pd.Timestamp(planning_end)
+    chart_data["display_start"] = chart_data["Start"].clip(lower=period_start)
+    clipped_inclusive_end = chart_data["End"].clip(upper=period_end)
+    chart_data["display_end"] = clipped_inclusive_end + pd.Timedelta(days=1)
+    chart_data = chart_data[~(clipped_inclusive_end < chart_data["display_start"])].copy()
+    order = chart_data["Row"].drop_duplicates().tolist()
+    tips = ["Project", "project_code", "Discipline", "Start:T", "End:T", "Plan source",
+            "Remaining hours:Q", "Allocated hours:Q", "Required by:T", "Health status",
+            "Shortfall / surplus:Q"]
+
+    # Add colour, source opacity, clipping and tooltips incrementally to the base
+    # interval encoding. No layer supplies its own temporal domain.
+    bars = alt.Chart(chart_data).mark_bar(cornerRadius=2).encode(
+        x=alt.X("display_start:T", title="Calendar date"),
+        x2="display_end:T",
+        y=alt.Y("Row:N", sort=order, title="Project / department"),
+        color=alt.Color("Discipline:N", scale=alt.Scale(
+            domain=DISCIPLINES, range=["#72a5d3", "#76b77b", "#c9ad6a"]), title="Discipline"),
+        opacity=alt.Opacity("Plan source:N", scale=alt.Scale(
+            domain=["Manager allocation", "Forecast baseline"], range=[1, .28]), title="Plan source"),
+        tooltip=tips,
+    )
+    deadlines = alt.Chart(chart_data).mark_tick(color="#b23a48", thickness=2, size=18).encode(
+        x=alt.X("Deadline:T", title="Calendar date"),
+        y=alt.Y("Row:N", sort=order, title="Project / department"),
+        tooltip=["Project", "Required by:T", "Late"],
+    )
+    chart = alt.layer(bars, deadlines).resolve_scale(x="shared", y="shared").properties(
+        height=max(240, len(chart_data) * 28)
+    )
+    st.altair_chart(chart, use_container_width=True)
+    st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
+    st.dataframe(gantt, hide_index=True, use_container_width=True)
+
+
 planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
 planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
 weeks = week_starts(planning_start, planning_end) if planning_end >= planning_start else []
@@ -250,15 +318,7 @@ def planning_view() -> None:
         gantt=allocation_timeline(weeks,department)
         if gantt.empty: st.info("No allocation or forecast baseline in this range.")
         else:
-            gantt["Row"]=gantt["Project"]+"  ·  "+gantt["Discipline"]; gantt["Start"]=pd.to_datetime(gantt.Start).dt.tz_localize(None); gantt["End"]=pd.to_datetime(gantt.End).dt.tz_localize(None); gantt["End display"]=gantt["End"]+pd.Timedelta(days=1); gantt["Deadline"]=pd.to_datetime(gantt["Required by"],errors="coerce").dt.tz_localize(None)
-            order=gantt["Row"].drop_duplicates().tolist()
-            tips=["Project","project_code","Discipline","Start:T","End:T","Plan source","Remaining hours:Q","Allocated hours:Q","Required by:T","Health status","Shortfall / surplus:Q"]
-            domain=[pd.Timestamp(planning_start),pd.Timestamp(planning_end+timedelta(days=7))]
-            bars=alt.Chart(gantt).mark_bar(cornerRadius=2).encode(x=alt.X("Start:T",scale=alt.Scale(domain=domain),title="Calendar date"),x2=alt.X2("End display:T"),y=alt.Y("Row:N",sort=order,title="Project / department"),color=alt.Color("Discipline:N",scale=alt.Scale(domain=DISCIPLINES,range=["#72a5d3","#76b77b","#c9ad6a"])),opacity=alt.Opacity("Plan source:N",scale=alt.Scale(domain=["Manager allocation","Forecast baseline"],range=[1,.28])),tooltip=tips)
-            deadlines=alt.Chart(gantt).mark_tick(color="#b23a48",thickness=2,size=18).encode(x="Deadline:T",y=alt.Y("Row:N",sort=order),tooltip=["Project","Required by:T","Late"])
-            st.altair_chart((bars+deadlines).properties(height=max(240,len(gantt)*28)),use_container_width=True)
-            st.caption("Solid = Manager allocation; translucent = Forecast baseline. Red ticks = Required By. Department colour is not health.")
-            st.dataframe(gantt.drop(columns=["Row","Deadline","End display"]),hide_index=True,use_container_width=True)
+            render_gantt_chart(gantt, planning_start, planning_end)
     with sequence_tab:
         st.subheader("RS → GIS → PLS sequence analysis")
         st.caption("Advisory only: findings use explicit manager allocations and never move work or change project health.")
