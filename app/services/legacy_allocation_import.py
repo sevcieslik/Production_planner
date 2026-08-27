@@ -1,6 +1,7 @@
 """Preview and atomically replace manager allocations from the legacy planner CSV."""
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 from datetime import date, datetime, timedelta
@@ -15,6 +16,17 @@ DISCIPLINE_MAP = {"1_RS": "RS", "2_GIS": "GIS", "3_PLS": "PLS"}
 ADMIN_NOTE = "legacy_planner_allocation_import:Administrative"
 WARNING = ("This import will replace ALL existing project manager allocations. Existing weekly "
            "project allocations will be deleted before the imported plan is applied.")
+
+
+def legacy_upload_key(filename: str, content: bytes) -> str:
+    """Return a stable identity for one uploaded legacy planner file."""
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    return f"{filename}_{digest}"
+
+
+def legacy_preview_row_key(row_number: int, legacy_project: str, department: str) -> str:
+    """Return the stable identity of a source row used by mapping UI state."""
+    return f"{row_number}_{legacy_project}_{department}"
 
 
 def _text(value: Any) -> str:
@@ -107,12 +119,15 @@ def preview_legacy_allocation(source: BinaryIO | bytes, *, filename: str = "lega
         candidates = exact.get(legacy_name.strip().casefold(), [])
         if not candidates:
             candidates = normal.get(_normal_name(legacy_name), [])
-        manual_code = mappings.get(legacy_name)
+        mapping_id = legacy_preview_row_key(base["row_number"], legacy_name, department)
+        # The project-name fallback preserves compatibility for callers that supplied mappings
+        # before mappings became row-specific.
+        manual_code = mappings.get(mapping_id, mappings.get(legacy_name))
         if manual_code:
             candidates = [project for project in projects if project["project_code"] == manual_code]
         status = "Matched" if len(candidates) == 1 else "Ambiguous" if len(candidates) > 1 else "Unmatched"
         matched = candidates[0] if len(candidates) == 1 else {}
-        detail = {**base, "project_code": matched.get("project_code"),
+        detail = {**base, "mapping_id": mapping_id, "project_code": matched.get("project_code"),
                   "planner_project": matched.get("project_name"), "match_status": status,
                   "candidate_codes": [candidate["project_code"] for candidate in candidates]}
         details.append(detail)
