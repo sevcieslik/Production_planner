@@ -233,7 +233,12 @@ def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: 
     bars = alt.Chart(chart_data).mark_bar(cornerRadius=2).encode(
         x=alt.X("display_start:T", title="Calendar date"),
         x2="display_end:T",
-        y=alt.Y("Row:N", sort=order, title="Project / department"),
+        y=alt.Y(
+            "Row:N",
+            sort=order,
+            title="Project / department",
+            axis=alt.Axis(labelLimit=360, labelPadding=8),
+        ),
         color=alt.Color("Discipline:N", scale=alt.Scale(
             domain=DISCIPLINES, range=["#72a5d3", "#76b77b", "#c9ad6a"]), title="Discipline"),
         opacity=alt.Opacity("Plan source:N", scale=alt.Scale(
@@ -242,7 +247,12 @@ def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: 
     )
     deadlines = alt.Chart(chart_data).mark_tick(color="#b23a48", thickness=2, size=18).encode(
         x=alt.X("Deadline:T", title="Calendar date"),
-        y=alt.Y("Row:N", sort=order, title="Project / department"),
+        y=alt.Y(
+            "Row:N",
+            sort=order,
+            title="Project / department",
+            axis=alt.Axis(labelLimit=360, labelPadding=8),
+        ),
         tooltip=["Project", "Required by:T", "Late"],
     )
     chart = alt.layer(bars, deadlines).resolve_scale(x="shared", y="shared").properties(
@@ -425,7 +435,24 @@ def planning_view() -> None:
         st.subheader("Project-discipline plan health")
         counts=health.Health.value_counts() if not health.empty else pd.Series(dtype=int)
         cols=st.columns(4)
-        for col,label in zip(cols,["Unplanned","Under-resourced","Well-resourced","Over-resourced"]): col.metric(label,int(counts.get(label,0)))
+        for col,label in zip(cols,["Unplanned","Under-resourced","Well-resourced","Over-resourced"]):
+            status_rows = health[health["Health"] == label]
+            col.metric(label, int(counts.get(label, 0)))
+            with col.popover("View projects", use_container_width=True):
+                if status_rows.empty:
+                    st.caption(f"No {label.lower()} project-disciplines.")
+                else:
+                    details = status_rows[["Project Code", "Project", "Department"]].drop_duplicates()
+                    st.dataframe(
+                        details,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Project Code": "Code",
+                            "Project": "Project name",
+                            "Department": "Department",
+                        },
+                    )
         render_capacity_chart(bal, department)
         st.caption("Available capacity = contracted roster − approved absence − temporary unavailability, with temporary assignments moved between departments. Balance remains available capacity − project allocations − internal activities.")
         if department == "All" and not shortage.empty:
