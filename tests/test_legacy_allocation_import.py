@@ -7,7 +7,8 @@ from pathlib import Path
 
 import app.data.db as db
 from app.services.legacy_allocation_import import (
-    DISCIPLINE_MAP, apply_legacy_allocation, preview_legacy_allocation,
+    DISCIPLINE_MAP, apply_legacy_allocation, legacy_preview_row_key, legacy_upload_key,
+    preview_legacy_allocation,
 )
 from app.services.mvp import get_data_version, save_projects
 
@@ -87,6 +88,32 @@ class LegacyAllocationImportTests(unittest.TestCase):
 
     def test_discipline_mapping_contract(self):
         self.assertEqual(DISCIPLINE_MAP, {"1_RS": "RS", "2_GIS": "GIS", "3_PLS": "PLS"})
+
+    def test_widget_identities_are_stable_and_unique_for_duplicate_projects(self):
+        content = csv_file([
+            "TRUE,Repeated,1_RS,5,5,0,,5,",
+            "TRUE,Repeated,2_GIS,5,5,0,,5,",
+            "TRUE,Repeated,1_RS,5,5,0,,5,",
+        ])
+        first_upload_key = legacy_upload_key("legacy.csv", content)
+        self.assertEqual(first_upload_key, legacy_upload_key("legacy.csv", content))
+        self.assertNotEqual(first_upload_key, legacy_upload_key("legacy.csv", content + b"\n"))
+
+        preview = preview_legacy_allocation(content)
+        row_keys = [row["mapping_id"] for row in preview["rows"]]
+        self.assertEqual(len(row_keys), len(set(row_keys)))
+        self.assertEqual(row_keys[0], legacy_preview_row_key(2, "Repeated", "RS"))
+
+    def test_manual_mappings_are_independent_per_source_row(self):
+        content = csv_file([
+            "TRUE,Repeated,1_RS,5,5,0,,5,",
+            "TRUE,Repeated,2_GIS,5,5,0,,5,",
+        ])
+        rs_key = legacy_preview_row_key(2, "Repeated", "RS")
+        resolved = preview_legacy_allocation(content, mappings={rs_key: "P1"})
+        self.assertEqual(resolved["rows"][0]["project_code"], "P1")
+        self.assertEqual(resolved["rows"][0]["match_status"], "Matched")
+        self.assertEqual(resolved["rows"][1]["match_status"], "Unmatched")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,8 @@ from app.services.setup_transfer import (
     export_projects_csv, preview_planner_setup, preview_project_import,
 )
 from app.services.legacy_allocation_import import (
-    apply_legacy_allocation, preview_legacy_allocation,
+    apply_legacy_allocation, legacy_preview_row_key, legacy_upload_key,
+    preview_legacy_allocation,
 )
 from app.ui.visuals import (
     AVAILABILITY_COLOURS, CAPACITY_COLOURS, DEPARTMENT_COLOURS,
@@ -631,10 +632,12 @@ def administration_view() -> None:
         st.caption("Replace the complete weekly manager allocation from a legacy Capacity Planner CSV. Project demand and setup data are not imported.")
         legacy_upload=st.file_uploader("Upload legacy Capacity Planner CSV",type=["csv"],key="legacy_allocation_csv")
         if legacy_upload:
-            include_inactive=st.checkbox("Import allocations from inactive project rows",value=True,key="legacy_include_inactive")
-            mapping_key=f"legacy_mappings_{legacy_upload.name}"
+            legacy_content=legacy_upload.getvalue()
+            file_key=legacy_upload_key(legacy_upload.name,legacy_content)
+            include_inactive=st.checkbox("Import allocations from inactive project rows",value=True,key=f"legacy_include_inactive_{file_key}")
+            mapping_key=f"legacy_mappings_{file_key}"
             mappings=st.session_state.setdefault(mapping_key,{})
-            legacy_preview=preview_legacy_allocation(legacy_upload.getvalue(),filename=legacy_upload.name,
+            legacy_preview=preview_legacy_allocation(legacy_content,filename=legacy_upload.name,
                                                      mappings=mappings,include_inactive=include_inactive)
             st.error(legacy_preview["warning"])
             for error in legacy_preview["errors"]: st.error(error)
@@ -649,11 +652,13 @@ def administration_view() -> None:
                 st.markdown("#### Resolve project matches")
                 options={"Leave unresolved":None,**{f"{p['project_code']} · {p['project_name']}":p['project_code'] for p in legacy_preview["available_projects"]}}
                 for row in unresolved:
+                    row_key=row.get("mapping_id") or legacy_preview_row_key(
+                        row["row_number"],row["legacy_project"],row["department"])
                     selected=st.selectbox(f"{row['legacy_project']} ({row['department']}) — {row['match_status']}",options,
-                                          key=f"legacy_map_{legacy_upload.name}_{row['legacy_project']}")
+                                          key=f"legacy_map_{file_key}_{row_key}")
                     chosen=options[selected]
-                    if chosen and mappings.get(row["legacy_project"])!=chosen:
-                        mappings[row["legacy_project"]]=chosen; st.rerun()
+                    if chosen and mappings.get(row_key)!=chosen:
+                        mappings[row_key]=chosen; st.rerun()
             detail=pd.DataFrame(legacy_preview["rows"])
             if not detail.empty:
                 shown=detail.rename(columns={"legacy_project":"Legacy Project","legacy_discipline":"Legacy Discipline","department":"Mapped Discipline","planner_project":"Matched Planner Project","project_code":"Project Code","active":"Active","hrs_assigned":"HRS Assigned","weekly_total":"Imported Weekly Total","difference":"Difference","first_week":"First Allocated Week","last_week":"Last Allocated Week","match_status":"Match Status"})
@@ -661,9 +666,9 @@ def administration_view() -> None:
             if legacy_preview["internal_activities"]:
                 st.markdown("#### Internal Activities to import")
                 st.dataframe(pd.DataFrame([{k:v for k,v in row.items() if k!="cells"} for row in legacy_preview["internal_activities"]]),hide_index=True,use_container_width=True)
-            confirmed=st.checkbox("I understand that all existing project allocations will be replaced.",key=f"legacy_confirm_{legacy_upload.name}")
+            confirmed=st.checkbox("I understand that all existing project allocations will be replaced.",key=f"legacy_confirm_{file_key}")
             blocked=not legacy_preview["valid"] or bool(legacy_preview["ambiguous"]) or not confirmed
-            if st.button("Apply allocation import",type="primary",disabled=blocked):
+            if st.button("Apply allocation import",type="primary",disabled=blocked,key=f"legacy_apply_{file_key}"):
                 try:
                     result=apply_legacy_allocation(legacy_preview,user=user,confirmed=confirmed)
                     st.success(f"Legacy allocation imported successfully. Existing allocation removed: {result['removed_hours']:,.1f} h. New allocation imported: {result['imported_hours']:,.1f} h. Weeks imported: {result['earliest_week'] or '—'} – {result['latest_week'] or '—'}.")
