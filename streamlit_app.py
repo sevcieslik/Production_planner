@@ -25,6 +25,9 @@ from app.services.setup_transfer import (
     apply_planner_setup, apply_project_import, export_planner_setup,
     export_projects_csv, preview_planner_setup, preview_project_import,
 )
+from app.services.legacy_allocation_import import (
+    apply_legacy_allocation, preview_legacy_allocation,
+)
 from app.ui.visuals import (
     AVAILABILITY_COLOURS, CAPACITY_COLOURS, DEPARTMENT_COLOURS,
     DEPARTMENT_TINTS, HEALTH_COLOURS, INTERNAL_ACTIVITY_COLOUR,
@@ -624,6 +627,49 @@ def administration_view() -> None:
         edited=st.data_editor(base,num_rows="dynamic",hide_index=True,use_container_width=True)
         if st.button("Save internal activities",disabled=not user): save_internal_activities(edited.to_dict("records"),user); refresh()
     with imports_tab:
+        st.subheader("Legacy allocation plan")
+        st.caption("Replace the complete weekly manager allocation from a legacy Capacity Planner CSV. Project demand and setup data are not imported.")
+        legacy_upload=st.file_uploader("Upload legacy Capacity Planner CSV",type=["csv"],key="legacy_allocation_csv")
+        if legacy_upload:
+            include_inactive=st.checkbox("Import allocations from inactive project rows",value=True,key="legacy_include_inactive")
+            mapping_key=f"legacy_mappings_{legacy_upload.name}"
+            mappings=st.session_state.setdefault(mapping_key,{})
+            legacy_preview=preview_legacy_allocation(legacy_upload.getvalue(),filename=legacy_upload.name,
+                                                     mappings=mappings,include_inactive=include_inactive)
+            st.error(legacy_preview["warning"])
+            for error in legacy_preview["errors"]: st.error(error)
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric("Existing allocation to remove",f"{legacy_preview['existing_records']} records",f"{legacy_preview['existing_hours']:,.1f} h")
+            m2.metric("Legacy rows detected",legacy_preview["legacy_rows"])
+            m3.metric("Matched / unmatched / ambiguous",f"{legacy_preview['matched']} / {legacy_preview['unmatched']} / {legacy_preview['ambiguous']}")
+            m4.metric("Allocation to import",f"{legacy_preview['import_records']} records",f"{legacy_preview['import_hours']:,.1f} h")
+            w1,w2,w3,w4=st.columns(4); w1.metric("Earliest week",legacy_preview["earliest_week"] or "—"); w2.metric("Latest week",legacy_preview["latest_week"] or "—"); w3.metric("Weeks with allocation",legacy_preview["weeks"]); w4.metric("Internal Activity hours",f"{legacy_preview['internal_hours']:,.1f}")
+            unresolved=[row for row in legacy_preview["rows"] if row["match_status"]!="Matched"]
+            if unresolved:
+                st.markdown("#### Resolve project matches")
+                options={"Leave unresolved":None,**{f"{p['project_code']} · {p['project_name']}":p['project_code'] for p in legacy_preview["available_projects"]}}
+                for row in unresolved:
+                    selected=st.selectbox(f"{row['legacy_project']} ({row['department']}) — {row['match_status']}",options,
+                                          key=f"legacy_map_{legacy_upload.name}_{row['legacy_project']}")
+                    chosen=options[selected]
+                    if chosen and mappings.get(row["legacy_project"])!=chosen:
+                        mappings[row["legacy_project"]]=chosen; st.rerun()
+            detail=pd.DataFrame(legacy_preview["rows"])
+            if not detail.empty:
+                shown=detail.rename(columns={"legacy_project":"Legacy Project","legacy_discipline":"Legacy Discipline","department":"Mapped Discipline","planner_project":"Matched Planner Project","project_code":"Project Code","active":"Active","hrs_assigned":"HRS Assigned","weekly_total":"Imported Weekly Total","difference":"Difference","first_week":"First Allocated Week","last_week":"Last Allocated Week","match_status":"Match Status"})
+                st.dataframe(shown[["Legacy Project","Legacy Discipline","Mapped Discipline","Matched Planner Project","Project Code","Active","HRS Assigned","Imported Weekly Total","Difference","First Allocated Week","Last Allocated Week","Match Status"]].style.map(lambda value:"background-color: #d1fae5" if value=="Matched" else "background-color: #fef3c7" if value=="Unmatched" else "background-color: #fee2e2" if value=="Ambiguous" else ""),hide_index=True,use_container_width=True)
+            if legacy_preview["internal_activities"]:
+                st.markdown("#### Internal Activities to import")
+                st.dataframe(pd.DataFrame([{k:v for k,v in row.items() if k!="cells"} for row in legacy_preview["internal_activities"]]),hide_index=True,use_container_width=True)
+            confirmed=st.checkbox("I understand that all existing project allocations will be replaced.",key=f"legacy_confirm_{legacy_upload.name}")
+            blocked=not legacy_preview["valid"] or bool(legacy_preview["ambiguous"]) or not confirmed
+            if st.button("Apply allocation import",type="primary",disabled=blocked):
+                try:
+                    result=apply_legacy_allocation(legacy_preview,user=user,confirmed=confirmed)
+                    st.success(f"Legacy allocation imported successfully. Existing allocation removed: {result['removed_hours']:,.1f} h. New allocation imported: {result['imported_hours']:,.1f} h. Weeks imported: {result['earliest_week'] or '—'} – {result['latest_week'] or '—'}.")
+                    refresh()
+                except ValueError as exc: st.error(str(exc))
+        st.divider()
         st.subheader("Planner setup")
         st.caption("Move projects, resources, manager weekly allocations, internal activities and non-sensitive Employee ID mappings. Holidays, audit and authentication are not included.")
         today_name=date.today().isoformat()
