@@ -60,6 +60,37 @@ streamlit run streamlit_app.py
 
 The local database is `data/production_planner.sqlite` unless `DATABASE_PATH` overrides it.
 
+## PTM Planner multi-user foundation
+
+The PTM migration is being built around a PostgreSQL-ready planner store while the
+legacy Streamlit/SQLite workflow remains available during transition.
+
+The **PTM Planner** tab currently provides:
+
+- High Level project sync into source-controlled project records;
+- RS/GIS/PLS Projects / Work Queue calculations matching the PTM View precedence
+  (Remaining Override → PTM Estimate − Actual → Bid − Actual);
+- versioned manager inputs with optimistic conflict detection;
+- versioned person/project/week allocation storage;
+- active-session presence with a 15-second heartbeat;
+- PostgreSQL via `PLANNER_DATABASE_URL` or `DATABASE_URL`, with SQLite fallback for local development.
+
+The High Level sheet remains authoritative for project facts and bid hours. Manager
+planning fields are authoritative in the Planner database.
+
+### Additional environment variables
+
+```text
+PLANNER_DATABASE_URL=<Render PostgreSQL internal URL>
+HIGH_LEVEL_SPREADSHEET_ID=<High Level Google Sheet ID>
+GOOGLE_SERVICE_ACCOUNT_JSON=<service account JSON secret>
+GSHEETS_EXPORT_SPREADSHEET_ID=<optional reporting/export Google Sheet ID>
+```
+
+During migration, `PLANNER_DATABASE_URL` can point the new PTM store at PostgreSQL
+without changing the existing legacy SQLite database. Once parity is reached, the
+remaining legacy services can be migrated to the same PostgreSQL database.
+
 ## Render pilot deployment
 
 This pilot supports multiple browser users through **one** Streamlit service and one SQLite database. Keep the Render service at exactly one instance; do not enable horizontal scaling or multiple worker processes for this SQLite deployment.
