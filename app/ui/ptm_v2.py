@@ -18,6 +18,7 @@ from app.data.planner_store import (
     save_stage_input,
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
+from app.services.high_level_export import export_to_high_level
 from app.services.high_level_sync import sync_high_level_projects
 from app.services.ptm_capacity import weekly_person_capacity
 from app.services.ptm_migration import migrate_ptm_snapshot
@@ -135,7 +136,7 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
     st.session_state["ptm_presence_view"] = "Projects / Work Queue"
 
     if is_admin:
-        sync_col, migrate_col = c3.columns(2)
+        sync_col, migrate_col, export_col = c3.columns(3)
         if sync_col.button("Sync High Level now", key="ptm_high_level_sync"):
             try:
                 result = sync_high_level_projects()
@@ -169,6 +170,19 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
                         + ", ".join(result["skipped_people"])
                     )
                 st.rerun()
+        if export_col.button("Publish to High Level", key="ptm_high_level_export"):
+            try:
+                result = export_to_high_level()
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"High Level export failed: {exc}")
+            else:
+                st.success(
+                    "High Level updated: "
+                    + ", ".join(f"{sheet} {rows} rows" for sheet, rows in result.items())
+                    + ". Projects tab was not modified."
+                )
 
     try:
         frame = _queue_frame(department)
