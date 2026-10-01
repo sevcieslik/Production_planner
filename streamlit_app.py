@@ -784,19 +784,24 @@ def principles_view() -> None:
 
 
 labels = navigation_for_role(st.session_state.role)
-tabs = st.tabs(labels)
-tab_by_label = dict(zip(labels, tabs))
+selected_page = st.sidebar.radio(
+    "Navigation",
+    labels,
+    key="main_navigation",
+)
 
-with tab_by_label["Projects"]:
+# Render exactly one application area. The previous tab layout executed every page
+# on every Streamlit rerun, which made a small allocation edit pay for Projects,
+# Planning, Resource Management and Administration queries at the same time.
+if selected_page == "Projects":
     project_view()
-with tab_by_label["PTM Planner"]:
+elif selected_page == "PTM Planner":
     render_ptm_v2(user, is_admin=st.session_state.role == "admin")
-with tab_by_label["Planning"]:
+elif selected_page == "Planning":
     planning_view()
-with tab_by_label["Principles"]:
+elif selected_page == "Principles":
     principles_view()
-with tab_by_label["Resource Management"]:
+elif selected_page == "Resource Management":
     resource_management_view()
-if st.session_state.role == "admin":
-    with tab_by_label["Administration"]:
-        administration_view()
+elif selected_page == "Administration" and st.session_state.role == "admin":
+    administration_view()
