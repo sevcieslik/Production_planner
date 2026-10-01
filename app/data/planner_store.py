@@ -159,6 +159,16 @@ planner_time_off = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+integration_sync_status = Table(
+    "integration_sync_status",
+    metadata,
+    Column("source_name", String(128), primary_key=True),
+    Column("last_synced_at", DateTime(timezone=True), nullable=False),
+    Column("source_max_timestamp", DateTime(timezone=True)),
+    Column("rows_processed", Integer, nullable=False, default=0),
+    Column("details", Text),
+)
+
 active_sessions = Table(
     "active_sessions",
     metadata,
@@ -847,6 +857,65 @@ def list_weekly_allocations(
     )
     with engine.connect() as conn:
         return [dict(row) for row in conn.execute(stmt).mappings().all()]
+
+
+def record_sync_status(
+    source_name: str,
+    *,
+    rows_processed: int,
+    source_max_timestamp: datetime | None = None,
+    details: str | None = None,
+    engine: Engine | None = None,
+) -> dict[str, Any]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    name = str(source_name or "").strip()
+    if not name:
+        raise ValueError("source_name is required.")
+    now = _utcnow()
+    with engine.begin() as conn:
+        existing = conn.execute(
+            select(integration_sync_status).where(
+                integration_sync_status.c.source_name == name
+            )
+        ).mappings().first()
+        values = {
+            "last_synced_at": now,
+            "source_max_timestamp": source_max_timestamp,
+            "rows_processed": max(int(rows_processed), 0),
+            "details": details,
+        }
+        if existing is None:
+            conn.execute(
+                insert(integration_sync_status).values(source_name=name, **values)
+            )
+        else:
+            conn.execute(
+                update(integration_sync_status)
+                .where(integration_sync_status.c.source_name == name)
+                .values(**values)
+            )
+        return dict(
+            conn.execute(
+                select(integration_sync_status).where(
+                    integration_sync_status.c.source_name == name
+                )
+            ).mappings().one()
+        )
+
+
+def get_sync_status(
+    source_name: str, *, engine: Engine | None = None
+) -> dict[str, Any] | None:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(integration_sync_status).where(
+                integration_sync_status.c.source_name == source_name
+            )
+        ).mappings().first()
+    return _mapping(row)
 
 
 def heartbeat_session(
