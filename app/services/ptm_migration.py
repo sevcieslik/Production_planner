@@ -11,6 +11,7 @@ from app.data.planner_store import (
     save_stage_input,
     save_weekly_allocations_batch,
     upsert_actual_hours,
+    upsert_calendar_days,
     upsert_non_project_allocations,
 )
 from app.integrations.ptm_legacy import read_legacy_ptm_snapshot
@@ -45,6 +46,9 @@ def migrate_ptm_snapshot(
             continue
         valid_people.append(person)
 
+    calendar_result = upsert_calendar_days(
+        snapshot.get("calendar", []), engine=engine
+    )
     people_result = upsert_people(valid_people, user=user, engine=engine)
     existing_people.update(row["person_name"] for row in valid_people)
 
@@ -218,6 +222,7 @@ def migrate_ptm_snapshot(
     )
 
     return {
+        "calendar": calendar_result,
         "people": people_result,
         "skipped_people": skipped_people,
         "assignments_inserted": assignments_inserted,
