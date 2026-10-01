@@ -19,6 +19,7 @@ from app.data.planner_store import (
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
 from app.services.high_level_sync import sync_high_level_projects
+from app.services.ptm_capacity import weekly_person_capacity
 from app.services.ptm_migration import migrate_ptm_snapshot
 from app.services.ptm_planner_grid import (
     allocation_grid_summary,
@@ -26,6 +27,15 @@ from app.services.ptm_planner_grid import (
     changed_grid_cells,
     project_workload_card,
     save_grid_changes,
+)
+from app.services.ptm_resources import (
+    ResourceConflict,
+    list_assignments,
+    list_people,
+    list_time_off,
+    save_assignment,
+    save_person,
+    save_time_off,
 )
 from app.services.ptm_teams_breakdown import build_teams_breakdown
 from app.services.ptm_work_queue import build_work_queue
@@ -530,6 +540,382 @@ def _teams_breakdown() -> None:
         )
 
 
+def _resource_management(user: str) -> None:
+    st.subheader("People / Time Off")
+    st.caption(
+        "All edits are row-level. Filtering this view never deletes hidden roster records."
+    )
+    people_tab, assignment_tab, time_off_tab = st.tabs(
+        ["People", "Temporary assignments", "Time Off"]
+    )
+
+    with people_tab:
+        people = list_people(active_only=False)
+        today = date.today()
+        current_week = today - timedelta(days=today.weekday())
+        capacity_rows = weekly_person_capacity(current_week, 1)
+        capacity_by_person: dict[str, float] = {}
+        for row in capacity_rows:
+            capacity_by_person[row["person_name"]] = (
+                capacity_by_person.get(row["person_name"], 0.0)
+                + float(row.get("available_hours") or 0)
+            )
+
+        show = st.segmented_control(
+            "Roster view",
+            ["Active", "Inactive", "All"],
+            default="Active",
+            key="ptm_people_filter",
+        )
+        filtered = [
+            row for row in people
+            if show == "All"
+            or (show == "Active" and bool(row["active"]))
+            or (show == "Inactive" and not bool(row["active"]))
+        ]
+        display = pd.DataFrame(
+            [
+                {
+                    "Name": row["person_name"],
+                    "Home Department": row["home_department"],
+                    "Primary Role": row.get("primary_role"),
+                    "Standard h/day": row["standard_hours_day"],
+                    "Active": bool(row["active"]),
+                    "Active From": row.get("active_from"),
+                    "Active To": row.get("active_to"),
+                    "Available this week": round(capacity_by_person.get(row["person_name"], 0), 1),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in filtered
+            ]
+        )
+        if display.empty:
+            st.info("No people match the selected roster filter.")
+        else:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Standard h/day": st.column_config.NumberColumn(format="%.1f"),
+                    "Available this week": st.column_config.NumberColumn(format="%.1f"),
+                    "Active From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Active To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                },
+            )
+
+        st.markdown("#### Add or edit person")
+        choices = ["+ New person"] + [row["person_name"] for row in people]
+        selected = st.selectbox("Person", choices, key="ptm_people_edit")
+        current = None if selected == "+ New person" else next(
+            row for row in people if row["person_name"] == selected
+        )
+        version = 0 if current is None else int(current["version"])
+        with st.form("ptm_person_form"):
+            a, b, c1, d = st.columns(4)
+            name = a.text_input(
+                "Name",
+                "" if current is None else current["person_name"],
+                disabled=current is not None,
+                help="Existing names are stable record keys during the migration.",
+            )
+            home = b.selectbox(
+                "Home Department",
+                DEPARTMENTS,
+                index=0 if current is None else DEPARTMENTS.index(current["home_department"]),
+            )
+            standard = c1.number_input(
+                "Standard h/day",
+                min_value=0.5,
+                max_value=24.0,
+                step=0.5,
+                value=7.5 if current is None else float(current["standard_hours_day"]),
+            )
+            active = d.checkbox("Active", value=True if current is None else bool(current["active"]))
+            e, f = st.columns(2)
+            primary = e.text_input(
+                "Primary Role", "" if current is None else str(current.get("primary_role") or "")
+            )
+            secondary = f.text_input(
+                "Secondary Role", "" if current is None else str(current.get("secondary_role") or "")
+            )
+            g, h = st.columns(2)
+            active_from = g.date_input(
+                "Active From",
+                value=None if current is None else current.get("active_from"),
+            )
+            active_to = h.date_input(
+                "Active To",
+                value=None if current is None else current.get("active_to"),
+            )
+            submitted = st.form_submit_button("Save person", type="primary")
+
+        if submitted:
+            try:
+                save_person(
+                    name,
+                    home_department=home,
+                    primary_role=primary,
+                    secondary_role=secondary,
+                    standard_hours_day=standard,
+                    active=active,
+                    active_from=active_from,
+                    active_to=active_to,
+                    user=user,
+                    expected_version=version,
+                )
+            except ResourceConflict as exc:
+                current_row = exc.current or {}
+                st.error(
+                    "Conflict: another user changed this roster row first. "
+                    f"Current version: {current_row.get('version', '?')} "
+                    f"by {current_row.get('updated_by', 'another user')}. Reload before retrying."
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success("Person saved.")
+                st.rerun()
+
+    with assignment_tab:
+        people = list_people(active_only=False)
+        assignments = list_assignments()
+        display = pd.DataFrame(
+            [
+                {
+                    "ID": row["id"],
+                    "Name": row["person_name"],
+                    "From": row["from_date"],
+                    "To": row.get("to_date"),
+                    "Target Department": row["department"],
+                    "Allocation %": float(row["allocation_percent"]),
+                    "Assignment Type": row["assignment_type"],
+                    "Notes": row.get("notes"),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in assignments
+            ]
+        )
+        if not display.empty:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Allocation %": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+            )
+        else:
+            st.info("No temporary assignments recorded.")
+
+        st.markdown("#### Add or edit assignment")
+        assignment_choices = ["+ New assignment"] + [
+            f"{row['id']} · {row['person_name']} · {row['department']} · {row['from_date']}"
+            for row in assignments
+        ]
+        selected_assignment = st.selectbox(
+            "Assignment", assignment_choices, key="ptm_assignment_edit"
+        )
+        current_assignment = None
+        if selected_assignment != "+ New assignment":
+            assignment_id = int(selected_assignment.split(" · ", 1)[0])
+            current_assignment = next(
+                row for row in assignments if int(row["id"]) == assignment_id
+            )
+        person_names = [row["person_name"] for row in people]
+        if not person_names:
+            st.warning("Add roster people before creating temporary assignments.")
+        else:
+            with st.form("ptm_assignment_form"):
+                a, b, c1 = st.columns(3)
+                selected_person = a.selectbox(
+                    "Person",
+                    person_names,
+                    index=0 if current_assignment is None else person_names.index(current_assignment["person_name"]),
+                )
+                from_date = b.date_input(
+                    "From",
+                    value=date.today() if current_assignment is None else current_assignment["from_date"],
+                )
+                to_date = c1.date_input(
+                    "To",
+                    value=None if current_assignment is None else current_assignment.get("to_date"),
+                )
+                d, e, f = st.columns(3)
+                target = d.selectbox(
+                    "Target Department",
+                    DEPARTMENTS,
+                    index=0 if current_assignment is None else DEPARTMENTS.index(current_assignment["department"]),
+                )
+                allocation_pct = e.number_input(
+                    "Allocation %",
+                    min_value=1,
+                    max_value=100,
+                    step=5,
+                    value=100 if current_assignment is None else int(round(float(current_assignment["allocation_percent"]) * 100)),
+                )
+                assignment_type = f.selectbox(
+                    "Assignment Type",
+                    ["TEMP_SUPPORT", "SECONDMENT"],
+                    index=0 if current_assignment is None else (
+                        1 if current_assignment["assignment_type"] == "SECONDMENT" else 0
+                    ),
+                )
+                notes = st.text_area(
+                    "Notes",
+                    "" if current_assignment is None else str(current_assignment.get("notes") or ""),
+                )
+                submitted_assignment = st.form_submit_button(
+                    "Save assignment", type="primary"
+                )
+
+            if submitted_assignment:
+                try:
+                    save_assignment(
+                        assignment_id=None if current_assignment is None else int(current_assignment["id"]),
+                        person_name=selected_person,
+                        from_date=from_date,
+                        to_date=to_date,
+                        department=target,
+                        allocation_percent=float(allocation_pct) / 100,
+                        assignment_type=assignment_type,
+                        notes=notes,
+                        user=user,
+                        expected_version=0 if current_assignment is None else int(current_assignment["version"]),
+                    )
+                except ResourceConflict as exc:
+                    current_row = exc.current or {}
+                    st.error(
+                        "Conflict: another user changed this assignment first. "
+                        f"Current version: {current_row.get('version', '?')}."
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Temporary assignment saved.")
+                    st.rerun()
+
+    with time_off_tab:
+        people = list_people(active_only=False)
+        time_off_rows = list_time_off()
+        display = pd.DataFrame(
+            [
+                {
+                    "ID": row["id"],
+                    "Name": row["person_name"],
+                    "From": row["from_date"],
+                    "To": row.get("to_date"),
+                    "Type": row["time_off_type"],
+                    "Available h/day": row["available_hours_day"],
+                    "Notes": row.get("notes"),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in time_off_rows
+            ]
+        )
+        if not display.empty:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Available h/day": st.column_config.NumberColumn(format="%.1f"),
+                },
+            )
+        else:
+            st.info("No Time Off records.")
+
+        st.markdown("#### Add or edit Time Off")
+        time_off_choices = ["+ New Time Off"] + [
+            f"{row['id']} · {row['person_name']} · {row['from_date']}"
+            for row in time_off_rows
+        ]
+        selected_time_off = st.selectbox(
+            "Time Off record", time_off_choices, key="ptm_time_off_edit"
+        )
+        current_time_off = None
+        if selected_time_off != "+ New Time Off":
+            time_off_id = int(selected_time_off.split(" · ", 1)[0])
+            current_time_off = next(
+                row for row in time_off_rows if int(row["id"]) == time_off_id
+            )
+        person_names = [row["person_name"] for row in people]
+        if not person_names:
+            st.warning("Add roster people before creating Time Off.")
+        else:
+            with st.form("ptm_time_off_form"):
+                a, b, c1 = st.columns(3)
+                selected_person = a.selectbox(
+                    "Person",
+                    person_names,
+                    index=0 if current_time_off is None else person_names.index(current_time_off["person_name"]),
+                    key="ptm_time_off_person",
+                )
+                from_date = b.date_input(
+                    "From",
+                    value=date.today() if current_time_off is None else current_time_off["from_date"],
+                    key="ptm_time_off_from",
+                )
+                to_date = c1.date_input(
+                    "To",
+                    value=None if current_time_off is None else current_time_off.get("to_date"),
+                    key="ptm_time_off_to",
+                )
+                d, e = st.columns(2)
+                types = ["HOLIDAY", "SICK", "TRAINING", "APPOINTMENT", "OTHER"]
+                off_type = d.selectbox(
+                    "Type",
+                    types,
+                    index=0 if current_time_off is None or current_time_off["time_off_type"] not in types else types.index(current_time_off["time_off_type"]),
+                )
+                available = e.number_input(
+                    "Available h/day",
+                    min_value=0.0,
+                    max_value=24.0,
+                    step=0.5,
+                    value=0.0 if current_time_off is None else float(current_time_off["available_hours_day"]),
+                    help="0 = unavailable. 4 = half-day availability for an 8 h/day person.",
+                )
+                notes = st.text_area(
+                    "Notes",
+                    "" if current_time_off is None else str(current_time_off.get("notes") or ""),
+                    key="ptm_time_off_notes",
+                )
+                submitted_time_off = st.form_submit_button("Save Time Off", type="primary")
+
+            if submitted_time_off:
+                try:
+                    save_time_off(
+                        time_off_id=None if current_time_off is None else int(current_time_off["id"]),
+                        person_name=selected_person,
+                        from_date=from_date,
+                        to_date=to_date or from_date,
+                        time_off_type=off_type,
+                        available_hours_day=available,
+                        notes=notes,
+                        user=user,
+                        expected_version=0 if current_time_off is None else int(current_time_off["version"]),
+                    )
+                except ResourceConflict as exc:
+                    current_row = exc.current or {}
+                    st.error(
+                        "Conflict: another user changed this Time Off record first. "
+                        f"Current version: {current_row.get('version', '?')}."
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Time Off saved. Capacity will reflect the change immediately.")
+                    st.rerun()
+
+
 def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     init_planner_store()
     st.header("PTM Planner")
@@ -538,8 +924,8 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
         "row-level manager writes, optimistic conflict protection and live presence."
     )
     render_presence_bar()
-    queue_tab, planning_tab, teams_tab = st.tabs(
-        ["Projects / Work Queue", "RS / GIS / PLS", "Teams Breakdown"]
+    queue_tab, planning_tab, teams_tab, people_tab = st.tabs(
+        ["Projects / Work Queue", "RS / GIS / PLS", "Teams Breakdown", "People / Time Off"]
     )
     with queue_tab:
         _work_queue(user, is_admin=is_admin)
@@ -547,3 +933,5 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
         _planning_grid(user)
     with teams_tab:
         _teams_breakdown()
+    with people_tab:
+        _resource_management(user)
