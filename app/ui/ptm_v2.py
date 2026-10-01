@@ -10,6 +10,7 @@ from app.data.planner_store import (
     AllocationConflict,
     StageInputConflict,
     get_stage_input,
+    get_sync_status,
     heartbeat_session,
     init_planner_store,
     list_active_sessions,
@@ -18,6 +19,7 @@ from app.data.planner_store import (
     save_stage_input,
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
+from app.services.dot_sync import DOT_SYNC_SOURCE, sync_dot_actuals
 from app.services.high_level_export import export_to_high_level
 from app.services.high_level_sync import sync_high_level_projects
 from app.services.ptm_capacity import weekly_person_capacity
@@ -152,7 +154,7 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
     st.session_state["ptm_presence_view"] = "Projects / Work Queue"
 
     if is_admin:
-        sync_col, migrate_col, export_col = c3.columns(3)
+        sync_col, dot_col, migrate_col, export_col = c3.columns(4)
         if sync_col.button("Sync High Level now", key="ptm_high_level_sync"):
             try:
                 result = sync_high_level_projects()
@@ -164,6 +166,19 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
                 st.success(
                     f"High Level synced: {result['inserted']} new, "
                     f"{result['updated']} updated, {result['unchanged']} unchanged."
+                )
+                st.rerun()
+        if dot_col.button("Sync DoT actuals", key="ptm_dot_sync"):
+            try:
+                result = sync_dot_actuals()
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"DoT sync failed: {exc}")
+            else:
+                st.success(
+                    f"DoT synced: {result['aggregates']} project/department totals "
+                    f"from {result['source_rows_processed']} source rows."
                 )
                 st.rerun()
         if migrate_col.button("Import current PTM snapshot", key="ptm_legacy_migration"):
@@ -199,6 +214,20 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
                     + ", ".join(f"{sheet} {rows} rows" for sheet, rows in result.items())
                     + ". Projects tab was not modified."
                 )
+
+    dot_status = get_sync_status(DOT_SYNC_SOURCE)
+    if dot_status:
+        source_max = dot_status.get("source_max_timestamp")
+        source_text = (
+            source_max.strftime("%d %b %Y %H:%M")
+            if source_max is not None else "unknown source timestamp"
+        )
+        st.caption(
+            f"DoT actuals: last synced {dot_status['last_synced_at'].strftime('%d %b %Y %H:%M')} "
+            f"· latest source row {source_text} · {dot_status['rows_processed']:,} relevant rows"
+        )
+    else:
+        st.caption("DoT actuals have not yet been synced into the new Planner store.")
 
     try:
         frame = _queue_frame(department)
