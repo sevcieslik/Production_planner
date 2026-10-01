@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/ptm-view-integration
   pull_request:
 
 jobs:
