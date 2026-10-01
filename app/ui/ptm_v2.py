@@ -27,6 +27,7 @@ from app.services.ptm_planner_grid import (
     project_workload_card,
     save_grid_changes,
 )
+from app.services.ptm_teams_breakdown import build_teams_breakdown
 from app.services.ptm_work_queue import build_work_queue
 
 DEPARTMENTS = ("RS", "GIS", "PLS")
@@ -437,6 +438,98 @@ def _planning_grid(user: str) -> None:
         )
 
 
+def _teams_breakdown() -> None:
+    st.subheader("Teams Breakdown")
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 2])
+    view_mode = c1.selectbox(
+        "View Mode", ["By Department", "By Project"], key="ptm_tb_view_mode"
+    )
+    department = c2.selectbox(
+        "Department", ["All", *DEPARTMENTS], key="ptm_tb_department"
+    )
+    scope = c3.selectbox(
+        "Project Scope",
+        ["All", "Projects Only", "Activities Only", "Selected Projects"],
+        key="ptm_tb_scope",
+    )
+    today = date.today()
+    default_start = today - timedelta(days=today.weekday())
+    start_week = c4.date_input("Start Week", default_start, key="ptm_tb_start")
+    start_week = start_week - timedelta(days=start_week.weekday())
+    horizon = int(
+        c5.selectbox(
+            "Horizon", [4, 8, 12, 16, 26], index=2,
+            format_func=lambda n: f"{n} weeks", key="ptm_tb_horizon",
+        )
+    )
+
+    selected_projects: list[str] = []
+    if scope == "Selected Projects":
+        projects = list_projects(active_only=True)
+        options = {
+            f"{row['project_code']} · {row['project_name']}": row["project_code"]
+            for row in projects
+        }
+        selected_labels = st.multiselect(
+            "Selected projects",
+            list(options),
+            key="ptm_tb_selected_projects",
+        )
+        selected_projects = [options[label] for label in selected_labels]
+
+    st.session_state["ptm_presence_view"] = "Teams Breakdown"
+    st.session_state["ptm_presence_department"] = None if department == "All" else department
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    frame, summary = build_teams_breakdown(
+        start_week=start_week,
+        horizon_weeks=horizon,
+        view_mode=view_mode,
+        department=department,
+        scope=scope,
+        selected_projects=selected_projects,
+    )
+    if frame.empty:
+        st.info("No rows match the current Teams Breakdown filters.")
+    else:
+        week_columns = [
+            column for column in frame.columns
+            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-"
+        ]
+        config = {
+            "Remaining h": st.column_config.NumberColumn(format="%.1f"),
+            "Assigned h": st.column_config.NumberColumn(format="%.1f"),
+            "Gap vs Remaining": st.column_config.NumberColumn(format="%.1f"),
+            "Actual h": st.column_config.NumberColumn(format="%.1f"),
+        }
+        for column in week_columns:
+            config[column] = st.column_config.NumberColumn(
+                date.fromisoformat(column).strftime("%d %b"), format="%.1f"
+            )
+        st.dataframe(
+            frame,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+    st.markdown("#### Department capacity")
+    if not summary.empty:
+        summary_config = {}
+        for column in summary.columns:
+            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-":
+                summary_config[column] = st.column_config.NumberColumn(
+                    date.fromisoformat(column).strftime("%d %b"), format="%.1f"
+                )
+        st.dataframe(
+            summary,
+            hide_index=True,
+            use_container_width=True,
+            column_config=summary_config,
+        )
+
+
 def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     init_planner_store()
     st.header("PTM Planner")
@@ -453,7 +546,4 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     with planning_tab:
         _planning_grid(user)
     with teams_tab:
-        st.info(
-            "Teams Breakdown will be read from the same PostgreSQL allocation records, "
-            "not from a second planning table."
-        )
+        _teams_breakdown()
