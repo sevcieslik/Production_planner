@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any, Iterable
 
-from app.data.planner_store import DEPARTMENTS, get_engine
+from app.data.planner_store import DEPARTMENTS, get_engine, list_calendar_days
 from app.services.ptm_resources import list_assignments, list_people, list_time_off
 
 
@@ -67,8 +67,11 @@ def available_hours_for_day(
     person: dict[str, Any],
     time_off_rows: Iterable[dict[str, Any]],
     day: date,
+    *,
+    working_day: bool | None = None,
 ) -> tuple[float, bool]:
-    if day.weekday() >= 5 or not _active_on_day(person, day):
+    is_working_day = day.weekday() < 5 if working_day is None else bool(working_day)
+    if not is_working_day or not _active_on_day(person, day):
         return 0.0, False
 
     standard = max(float(person.get("standard_hours_day") or 0), 0)
@@ -104,15 +107,31 @@ def weekly_person_capacity(
     assignments = list_assignments(engine=engine)
     time_off = list_time_off(engine=engine)
     weeks = week_starts(start_week, horizon_weeks)
+    if weeks:
+        calendar_rows = list_calendar_days(
+            start_date=weeks[0],
+            end_date=weeks[-1] + timedelta(days=6),
+            engine=engine,
+        )
+    else:
+        calendar_rows = []
+    working_days = {
+        row["work_date"]: bool(row["effective_working_day"]) for row in calendar_rows
+    }
     output: list[dict[str, Any]] = []
 
     for person in people:
         for week in weeks:
             totals = {code: 0.0 for code in DEPARTMENTS}
             has_time_off = False
-            for offset in range(5):
+            for offset in range(7):
                 day = week + timedelta(days=offset)
-                available, off = available_hours_for_day(person, time_off, day)
+                available, off = available_hours_for_day(
+                    person,
+                    time_off,
+                    day,
+                    working_day=working_days.get(day),
+                )
                 has_time_off = has_time_off or off
                 if available <= 0:
                     continue
