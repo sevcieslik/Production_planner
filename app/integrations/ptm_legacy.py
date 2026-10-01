@@ -16,6 +16,7 @@ ASSIGNMENTS_SHEET = "_team_assignments"
 TIME_OFF_SHEET = "Time Off"
 DEMAND_SHEET = "_project_demand"
 ALLOCATIONS_SHEET = "_resource_allocations"
+CALENDAR_SHEET = "_calendar"
 
 
 def _text(value: Any) -> str:
@@ -57,6 +58,7 @@ def read_legacy_ptm_snapshot(
     time_off_rows = _records(spreadsheet, TIME_OFF_SHEET)
     demand_rows = _records(spreadsheet, DEMAND_SHEET)
     allocation_rows = _records(spreadsheet, ALLOCATIONS_SHEET)
+    calendar_rows = _records(spreadsheet, CALENDAR_SHEET)
 
     people = []
     for row in roster_rows:
@@ -152,10 +154,26 @@ def read_legacy_ptm_snapshot(
             }
         )
 
+    calendar = []
+    for row in calendar_rows:
+        work_date = date_or_none(row.get("Date"))
+        if work_date is None:
+            continue
+        calendar.append(
+            {
+                "work_date": work_date,
+                "effective_working_day": _bool(row.get("Effective Working Day")),
+                "bank_holiday": _bool(row.get("Bank Holiday")),
+                "holiday_name": _text(row.get("Holiday Name")) or None,
+                "source": _text(row.get("Source")) or "PTM calendar",
+            }
+        )
+
     return {
         "people": people,
         "assignments": assignments,
         "time_off": time_off,
         "demand": demand,
         "allocations": allocations,
+        "calendar": calendar,
     }
