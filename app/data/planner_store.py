@@ -612,6 +612,107 @@ def save_weekly_allocation(
         return dict(saved)
 
 
+def save_weekly_allocations_batch(
+    changes: Iterable[dict[str, Any]],
+    *,
+    user: str,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    """Atomically save changed allocation cells using per-cell optimistic versions."""
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    now = _utcnow()
+    saved_rows: list[dict[str, Any]] = []
+
+    with engine.begin() as conn:
+        for change in changes:
+            project_code = str(change.get("project_code") or "").strip()
+            person_name = str(change.get("person_name") or "").strip()
+            department = _validate_department(change.get("department"))
+            week_start = change.get("week_start")
+            hours = round(float(change.get("hours") or 0), 2)
+            expected_version = change.get("expected_version")
+
+            if not project_code or not person_name or not isinstance(week_start, date):
+                raise ValueError("Allocation change is missing project, person or week.")
+            if hours < 0:
+                raise ValueError("Allocation hours cannot be negative.")
+
+            key = and_(
+                planner_weekly_allocations.c.project_code == project_code,
+                planner_weekly_allocations.c.department == department,
+                planner_weekly_allocations.c.person_name == person_name,
+                planner_weekly_allocations.c.week_start == week_start,
+            )
+            existing = conn.execute(
+                select(planner_weekly_allocations).where(key)
+            ).mappings().first()
+
+            if existing is None:
+                if expected_version not in (None, 0):
+                    raise AllocationConflict(
+                        f"{person_name} / {week_start.isoformat()} no longer matches the loaded version."
+                    )
+                try:
+                    with conn.begin_nested():
+                        conn.execute(
+                            insert(planner_weekly_allocations).values(
+                                project_code=project_code,
+                                department=department,
+                                person_name=person_name,
+                                week_start=week_start,
+                                hours=hours,
+                                version=1,
+                                updated_by=user,
+                                updated_at=now,
+                            )
+                        )
+                except IntegrityError as exc:
+                    current = conn.execute(
+                        select(planner_weekly_allocations).where(key)
+                    ).mappings().first()
+                    raise AllocationConflict(
+                        f"{person_name} / {week_start.isoformat()} was created by another user.",
+                        _mapping(current),
+                    ) from exc
+            else:
+                if expected_version is None or int(expected_version) != int(existing["version"]):
+                    raise AllocationConflict(
+                        f"{person_name} / {week_start.isoformat()} changed after you loaded it.",
+                        dict(existing),
+                    )
+                result = conn.execute(
+                    update(planner_weekly_allocations)
+                    .where(
+                        and_(
+                            key,
+                            planner_weekly_allocations.c.version == int(expected_version),
+                        )
+                    )
+                    .values(
+                        hours=hours,
+                        version=int(expected_version) + 1,
+                        updated_by=user,
+                        updated_at=now,
+                    )
+                )
+                if result.rowcount != 1:
+                    current = conn.execute(
+                        select(planner_weekly_allocations).where(key)
+                    ).mappings().first()
+                    raise AllocationConflict(
+                        f"{person_name} / {week_start.isoformat()} was saved by another user first.",
+                        _mapping(current),
+                    )
+
+            saved = conn.execute(
+                select(planner_weekly_allocations).where(key)
+            ).mappings().one()
+            saved_rows.append(dict(saved))
+
+    return saved_rows
+
+
 def list_weekly_allocations(
     *,
     department: str | None = None,
