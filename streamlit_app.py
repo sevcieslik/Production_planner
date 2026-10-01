@@ -7,6 +7,7 @@ import streamlit as st
 
 from app.auth import AuthenticationConfigurationError, authenticate, load_users, navigation_for_role
 from app.data.db import connect, initialize_database, rows, write_audit
+from app.data.planner_store import remove_session
 from app.services.mvp import (
     DISCIPLINES, RESOURCE_DATE_COLUMNS, allocation_timeline, apply_holiday_snapshot,
     apply_quick_allocation, capacity_balance, clear_future_allocation, create_escalation,
@@ -29,6 +30,7 @@ from app.services.legacy_allocation_import import (
     apply_legacy_allocation, legacy_preview_row_key, legacy_upload_key,
     preview_legacy_allocation,
 )
+from app.ui.ptm_v2 import render_ptm_v2
 from app.ui.visuals import (
     AVAILABILITY_COLOURS, CAPACITY_COLOURS, DEPARTMENT_COLOURS,
     DEPARTMENT_TINTS, HEALTH_COLOURS, INTERNAL_ACTIVITY_COLOUR,
@@ -172,7 +174,17 @@ title_col.title("Production Planner")
 title_col.caption(f"Signed in as {st.session_state.display_name} · {st.session_state.user_email}")
 if logout_col.button("Logout"):
     record_access_event(user, "Logout")
-    for key in ("authenticated", "user_email", "display_name", "role"):
+    presence_session_id = st.session_state.get("ptm_presence_session_id")
+    if presence_session_id:
+        try:
+            remove_session(presence_session_id)
+        except Exception:
+            pass
+    for key in (
+        "authenticated", "user_email", "display_name", "role",
+        "ptm_presence_session_id", "ptm_presence_view", "ptm_presence_department",
+        "ptm_presence_project", "ptm_presence_scope",
+    ):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -773,9 +785,18 @@ def principles_view() -> None:
 
 labels = navigation_for_role(st.session_state.role)
 tabs = st.tabs(labels)
-with tabs[0]: project_view()
-with tabs[1]: planning_view()
-with tabs[2]: principles_view()
-with tabs[3]: resource_management_view()
+tab_by_label = dict(zip(labels, tabs))
+
+with tab_by_label["Projects"]:
+    project_view()
+with tab_by_label["PTM Planner"]:
+    render_ptm_v2(user, is_admin=st.session_state.role == "admin")
+with tab_by_label["Planning"]:
+    planning_view()
+with tab_by_label["Principles"]:
+    principles_view()
+with tab_by_label["Resource Management"]:
+    resource_management_view()
 if st.session_state.role == "admin":
-    with tabs[4]: administration_view()
+    with tab_by_label["Administration"]:
+        administration_view()
