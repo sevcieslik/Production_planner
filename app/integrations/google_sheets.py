@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
 import gspread
@@ -64,13 +64,16 @@ def _float_or_none(value: Any) -> float | None:
         return None
 
 
-def _date_or_none(value: Any) -> date | None:
+def date_or_none(value: Any) -> date | None:
     if value in (None, ""):
         return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, (int, float)):
+        # Google Sheets / Excel serial date system.
+        return date(1899, 12, 30) + timedelta(days=int(value))
     text = _text(value)
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y", "%m/%d/%Y"):
         try:
@@ -95,13 +98,13 @@ def normalise_high_level_projects(rows: Iterable[dict[str, Any]]) -> list[dict[s
                 "active": _bool(row.get("Active")),
                 "project_manager": _text(row.get("Project Manager")) or None,
                 "priority": _text(row.get("Priority")) or None,
-                "production_deadline": _date_or_none(row.get("Production Deadline")),
-                "delivery_deadline": _date_or_none(row.get("Delivery Deadline")),
+                "production_deadline": date_or_none(row.get("Production Deadline")),
+                "delivery_deadline": date_or_none(row.get("Delivery Deadline")),
                 "bid_rs_h": _float_or_none(row.get("Bid RS h")),
                 "bid_gis_h": _float_or_none(row.get("Bid GIS h")),
                 "bid_pls_h": _float_or_none(row.get("Bid PLS h")),
                 "notes": _text(row.get("Notes")) or None,
-                "last_pm_update": _date_or_none(row.get("Last PM Update")),
+                "last_pm_update": date_or_none(row.get("Last PM Update")),
             }
         )
     return output
