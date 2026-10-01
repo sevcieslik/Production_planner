@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     and_,
     create_engine,
     delete,
@@ -93,6 +94,57 @@ planner_weekly_allocations = Table(
     PrimaryKeyConstraint("project_code", "department", "person_name", "week_start"),
 )
 
+planner_people = Table(
+    "planner_people",
+    metadata,
+    Column("person_name", String(255), primary_key=True),
+    Column("home_department", String(8), nullable=False),
+    Column("primary_role", String(255)),
+    Column("secondary_role", String(255)),
+    Column("standard_hours_day", Float, nullable=False, default=7.5),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("active_from", Date),
+    Column("active_to", Date),
+    Column("version", Integer, nullable=False, default=1),
+    Column("updated_by", String(255), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+planner_team_assignments = Table(
+    "planner_team_assignments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("person_name", String(255), ForeignKey("planner_people.person_name", ondelete="CASCADE"), nullable=False),
+    Column("from_date", Date, nullable=False),
+    Column("to_date", Date),
+    Column("department", String(8), nullable=False),
+    Column("allocation_percent", Float, nullable=False),
+    Column("assignment_type", String(64), nullable=False, default="TEMP_SUPPORT"),
+    Column("notes", Text),
+    Column("version", Integer, nullable=False, default=1),
+    Column("updated_by", String(255), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "person_name", "from_date", "to_date", "department", "assignment_type",
+        name="uq_planner_team_assignment",
+    ),
+)
+
+planner_time_off = Table(
+    "planner_time_off",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("person_name", String(255), ForeignKey("planner_people.person_name", ondelete="CASCADE"), nullable=False),
+    Column("from_date", Date, nullable=False),
+    Column("to_date", Date),
+    Column("time_off_type", String(64), nullable=False, default="HOLIDAY"),
+    Column("available_hours_day", Float, nullable=False, default=0),
+    Column("notes", Text),
+    Column("version", Integer, nullable=False, default=1),
+    Column("updated_by", String(255), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 active_sessions = Table(
     "active_sessions",
     metadata,
@@ -111,6 +163,9 @@ active_sessions = Table(
 Index("idx_planner_allocations_week", planner_weekly_allocations.c.department, planner_weekly_allocations.c.week_start)
 Index("idx_planner_allocations_project", planner_weekly_allocations.c.project_code, planner_weekly_allocations.c.department)
 Index("idx_active_sessions_last_seen", active_sessions.c.last_seen_at)
+Index("idx_planner_people_department", planner_people.c.home_department, planner_people.c.active)
+Index("idx_planner_assignments_dates", planner_team_assignments.c.person_name, planner_team_assignments.c.from_date, planner_team_assignments.c.to_date)
+Index("idx_planner_time_off_dates", planner_time_off.c.person_name, planner_time_off.c.from_date, planner_time_off.c.to_date)
 
 
 class AllocationConflict(RuntimeError):
