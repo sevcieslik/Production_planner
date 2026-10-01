@@ -86,6 +86,7 @@ import tabs; application code never writes to the High Level `Projects` tab.
 PLANNER_DATABASE_URL=<Render PostgreSQL internal URL>
 HIGH_LEVEL_SPREADSHEET_ID=<High Level Google Sheet ID>
 PTM_LEGACY_SPREADSHEET_ID=<current PTM View Google Sheet ID; migration only>
+DOT_TIMES_SPREADSHEET_ID=<DoT Times Google Sheet ID>
 GOOGLE_SERVICE_ACCOUNT_JSON=<service account JSON secret>
 GSHEETS_EXPORT_SPREADSHEET_ID=<optional separate reporting/export Google Sheet ID>
 ```
