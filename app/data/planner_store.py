@@ -94,6 +94,20 @@ planner_weekly_allocations = Table(
     PrimaryKeyConstraint("project_code", "department", "person_name", "week_start"),
 )
 
+planner_non_project_allocations = Table(
+    "planner_non_project_allocations",
+    metadata,
+    Column("activity_name", String(255), nullable=False),
+    Column("department", String(8), nullable=False),
+    Column("person_name", String(255), nullable=False),
+    Column("week_start", Date, nullable=False),
+    Column("hours", Float, nullable=False, default=0),
+    Column("version", Integer, nullable=False, default=1),
+    Column("updated_by", String(255), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    PrimaryKeyConstraint("activity_name", "department", "person_name", "week_start"),
+)
+
 planner_people = Table(
     "planner_people",
     metadata,
@@ -164,6 +178,7 @@ Index("idx_planner_allocations_week", planner_weekly_allocations.c.department, p
 Index("idx_planner_allocations_project", planner_weekly_allocations.c.project_code, planner_weekly_allocations.c.department)
 Index("idx_active_sessions_last_seen", active_sessions.c.last_seen_at)
 Index("idx_planner_people_department", planner_people.c.home_department, planner_people.c.active)
+Index("idx_planner_non_project_week", planner_non_project_allocations.c.department, planner_non_project_allocations.c.week_start)
 Index("idx_planner_assignments_dates", planner_team_assignments.c.person_name, planner_team_assignments.c.from_date, planner_team_assignments.c.to_date)
 Index("idx_planner_time_off_dates", planner_time_off.c.person_name, planner_time_off.c.from_date, planner_time_off.c.to_date)
 
@@ -711,6 +726,95 @@ def save_weekly_allocations_batch(
             saved_rows.append(dict(saved))
 
     return saved_rows
+
+
+def upsert_non_project_allocations(
+    records: Iterable[dict[str, Any]],
+    *,
+    user: str = "Migration",
+    engine: Engine | None = None,
+) -> dict[str, int]:
+    """Idempotent import/upsert for non-project workload such as FLOW or Training."""
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    counts = {"inserted": 0, "updated": 0, "unchanged": 0}
+    now = _utcnow()
+    with engine.begin() as conn:
+        for record in records:
+            activity = str(record.get("activity_name") or "").strip()
+            person = str(record.get("person_name") or "").strip()
+            week = record.get("week_start")
+            if not activity or not person or not isinstance(week, date):
+                continue
+            department = _validate_department(record.get("department"))
+            hours = round(max(float(record.get("hours") or 0), 0), 2)
+            key = and_(
+                planner_non_project_allocations.c.activity_name == activity,
+                planner_non_project_allocations.c.department == department,
+                planner_non_project_allocations.c.person_name == person,
+                planner_non_project_allocations.c.week_start == week,
+            )
+            existing = conn.execute(
+                select(planner_non_project_allocations).where(key)
+            ).mappings().first()
+            if existing is None:
+                conn.execute(
+                    insert(planner_non_project_allocations).values(
+                        activity_name=activity,
+                        department=department,
+                        person_name=person,
+                        week_start=week,
+                        hours=hours,
+                        version=1,
+                        updated_by=user,
+                        updated_at=now,
+                    )
+                )
+                counts["inserted"] += 1
+            elif abs(float(existing["hours"] or 0) - hours) <= 0.005:
+                counts["unchanged"] += 1
+            else:
+                conn.execute(
+                    update(planner_non_project_allocations)
+                    .where(key)
+                    .values(
+                        hours=hours,
+                        version=int(existing["version"]) + 1,
+                        updated_by=user,
+                        updated_at=now,
+                    )
+                )
+                counts["updated"] += 1
+    return counts
+
+
+def list_non_project_allocations(
+    *,
+    department: str | None = None,
+    start_week: date | None = None,
+    end_week: date | None = None,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    stmt = select(planner_non_project_allocations)
+    conditions = []
+    if department:
+        conditions.append(planner_non_project_allocations.c.department == _validate_department(department))
+    if start_week:
+        conditions.append(planner_non_project_allocations.c.week_start >= start_week)
+    if end_week:
+        conditions.append(planner_non_project_allocations.c.week_start <= end_week)
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+    stmt = stmt.order_by(
+        planner_non_project_allocations.c.week_start,
+        planner_non_project_allocations.c.department,
+        planner_non_project_allocations.c.person_name,
+        planner_non_project_allocations.c.activity_name,
+    )
+    with engine.connect() as conn:
+        return [dict(row) for row in conn.execute(stmt).mappings().all()]
 
 
 def list_weekly_allocations(
