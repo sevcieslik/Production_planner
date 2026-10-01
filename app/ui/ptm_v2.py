@@ -85,6 +85,22 @@ def render_presence_bar() -> None:
         labels.append(f"● {row['display_name']} — {location}")
     st.caption("Active now: " + "   ".join(labels))
 
+    current_department = context.get("department")
+    current_project = context.get("project_code")
+    if current_department and current_project:
+        same_scope = [
+            row for row in active
+            if row.get("department") == current_department
+            and row.get("project_code") == current_project
+            and row.get("editing_scope") in {"weekly allocations", "manager inputs"}
+        ]
+        if same_scope:
+            names = ", ".join(row["display_name"] for row in same_scope)
+            st.warning(
+                f"Also editing {current_department} / {current_project}: {names}. "
+                "You can continue working; stale writes are blocked by version checks."
+            )
+
 
 def _parse_optional_number(value: str, label: str) -> float | None:
     text = str(value or "").strip()
