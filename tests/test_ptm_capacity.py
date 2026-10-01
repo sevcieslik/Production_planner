@@ -5,7 +5,7 @@ from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from app.data.planner_store import init_planner_store
+from app.data.planner_store import init_planner_store, upsert_calendar_days
 from app.services.ptm_capacity import weekly_person_capacity, weekly_team_capacity
 from app.services.ptm_resources import save_assignment, save_person, save_time_off
 
@@ -156,3 +156,37 @@ def test_team_capacity_aggregates_people():
     rows = weekly_team_capacity(date(2026, 10, 5), 1, engine=engine)
     pls = next(row for row in rows if row["department"] == "PLS")
     assert pls["available_hours"] == 75
+
+
+def test_bank_holiday_calendar_removes_capacity():
+    engine = _engine()
+    save_person(
+        "Holiday, Test",
+        home_department="RS",
+        primary_role="Remote Sensing Processor",
+        secondary_role=None,
+        standard_hours_day=8,
+        active=True,
+        active_from=None,
+        active_to=None,
+        user="Admin",
+        expected_version=0,
+        engine=engine,
+    )
+    upsert_calendar_days(
+        [
+            {
+                "work_date": date(2026, 10, 5),
+                "effective_working_day": False,
+                "bank_holiday": True,
+                "holiday_name": "Test Bank Holiday",
+                "source": "test",
+            }
+        ],
+        engine=engine,
+    )
+
+    rows = weekly_person_capacity(
+        date(2026, 10, 5), 1, department="RS", engine=engine
+    )
+    assert rows[0]["available_hours"] == 32
