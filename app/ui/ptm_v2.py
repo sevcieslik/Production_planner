@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from app.data.planner_store import (
+    AllocationConflict,
     StageInputConflict,
     get_stage_input,
     heartbeat_session,
@@ -18,6 +19,13 @@ from app.data.planner_store import (
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
 from app.services.high_level_sync import sync_high_level_projects
+from app.services.ptm_planner_grid import (
+    allocation_grid_summary,
+    build_department_grid,
+    changed_grid_cells,
+    project_workload_card,
+    save_grid_changes,
+)
 from app.services.ptm_work_queue import build_work_queue
 
 DEPARTMENTS = ("RS", "GIS", "PLS")
@@ -230,6 +238,185 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
             st.rerun()
 
 
+def _planning_grid(user: str) -> None:
+    st.subheader("RS / GIS / PLS Planner")
+    projects = list_projects(active_only=True)
+    if not projects:
+        st.info("Sync High Level projects before planning.")
+        return
+
+    top1, top2, top3 = st.columns([2, 2, 3])
+    department = top1.segmented_control(
+        "Department", DEPARTMENTS, default="RS", key="ptm_grid_department"
+    )
+    horizon = int(
+        top2.selectbox("Horizon", [4, 8, 12, 16, 26], index=2, format_func=lambda n: f"{n} weeks")
+    )
+    today = date.today()
+    default_start = today - pd.Timedelta(days=today.weekday())
+    start_week = top3.date_input("Planning start", default_start)
+    if isinstance(start_week, pd.Timestamp):
+        start_week = start_week.date()
+    start_week = start_week - pd.Timedelta(days=start_week.weekday())
+    if isinstance(start_week, pd.Timestamp):
+        start_week = start_week.date()
+
+    queue = build_work_queue()[department]
+    if not queue:
+        st.info(f"No active {department} project demand.")
+        return
+    choices = {
+        f"{row['Project Code']} · {row['Project']}": row["Project Code"] for row in queue
+    }
+    selected_label = st.selectbox("Project", list(choices), key="ptm_grid_project")
+    project_code = choices[selected_label]
+
+    st.session_state["ptm_presence_view"] = f"Planner {department}"
+    st.session_state["ptm_presence_department"] = department
+    st.session_state["ptm_presence_project"] = project_code
+    st.session_state["ptm_presence_scope"] = "weekly allocations"
+    heartbeat_session(
+        _presence_session_id(),
+        user_email=st.session_state.user_email,
+        display_name=st.session_state.display_name,
+        role=st.session_state.role,
+        **_presence_context(),
+    )
+
+    workload = project_workload_card(project_code, department)
+    metrics = st.columns(6)
+    metrics[0].metric("Bid", "—" if workload["Bid h"] is None else f"{workload['Bid h']:,.1f} h")
+    metrics[1].metric("Estimate", "—" if workload["Estimate h"] is None else f"{workload['Estimate h']:,.1f} h")
+    metrics[2].metric("Actual", f"{workload['Actual h']:,.1f} h")
+    metrics[3].metric("Remaining", "—" if workload["Remaining h"] is None else f"{workload['Remaining h']:,.1f} h")
+    metrics[4].metric("Planned", f"{workload['Planned h']:,.1f} h")
+    metrics[5].metric("Action", workload["Action"])
+
+    snapshot_key = (
+        f"ptm_grid_snapshot::{department}::{project_code}::"
+        f"{start_week.isoformat()}::{horizon}"
+    )
+    active_snapshot_key = "ptm_active_grid_snapshot"
+    if st.session_state.get(active_snapshot_key) != snapshot_key:
+        st.session_state[active_snapshot_key] = snapshot_key
+
+    if snapshot_key not in st.session_state:
+        frame, versions, weeks = build_department_grid(
+            department,
+            project_code,
+            start_week=start_week,
+            horizon_weeks=horizon,
+        )
+        st.session_state[snapshot_key] = {
+            "frame": frame.to_dict("records"),
+            "versions": versions,
+            "weeks": [week.isoformat() for week in weeks],
+        }
+
+    snapshot = st.session_state[snapshot_key]
+    original = pd.DataFrame(snapshot["frame"])
+    weeks = [date.fromisoformat(value) for value in snapshot["weeks"]]
+    versions = snapshot["versions"]
+
+    if original.empty:
+        st.warning(
+            "No processors are available in this department yet. "
+            "Roster / temporary assignments can be added in the Resource migration step."
+        )
+        return
+
+    week_columns = [week.isoformat() for week in weeks]
+    disabled = ["Person", "Role", "H Available", "H Left", "Time Off"]
+    column_config = {
+        "H Available": st.column_config.NumberColumn(format="%.1f"),
+        "H Left": st.column_config.NumberColumn(format="%.1f"),
+        "Time Off": st.column_config.CheckboxColumn(),
+    }
+    for week in weeks:
+        column_config[week.isoformat()] = st.column_config.NumberColumn(
+            week.strftime("%d %b"),
+            min_value=0.0,
+            step=0.5,
+            format="%.1f",
+        )
+
+    st.caption(
+        "Edits stay in your session until Save changes. Only changed cells are written. "
+        "If another manager saves the same cell first, your save is rejected rather than overwriting it."
+    )
+    edited = st.data_editor(
+        original,
+        hide_index=True,
+        use_container_width=True,
+        disabled=disabled,
+        column_config=column_config,
+        key=f"ptm_grid_editor::{snapshot_key}",
+    )
+
+    changes = changed_grid_cells(
+        original,
+        edited,
+        project_code=project_code,
+        department=department,
+        weeks=weeks,
+        versions=versions,
+    )
+    save_col, reload_col, info_col = st.columns([2, 2, 6])
+    save_clicked = save_col.button(
+        f"Save changes ({len(changes)})",
+        type="primary",
+        disabled=not changes,
+        key=f"ptm_grid_save::{snapshot_key}",
+    )
+    if reload_col.button("Reload latest", key=f"ptm_grid_reload::{snapshot_key}"):
+        st.session_state.pop(snapshot_key, None)
+        st.session_state.pop(f"ptm_grid_editor::{snapshot_key}", None)
+        st.rerun()
+    info_col.caption(
+        "Snapshot is intentionally held stable while you edit; Reload latest discards unsaved local edits."
+    )
+
+    if save_clicked:
+        try:
+            save_grid_changes(changes, user=user)
+        except AllocationConflict as exc:
+            current = exc.current or {}
+            st.error(
+                "Conflict: another user saved one of the same allocation cells first. "
+                f"Current value: {current.get('hours', '?')} h, "
+                f"version {current.get('version', '?')}, by {current.get('updated_by', 'another user')}. "
+                "Your batch was rolled back. Reload latest before retrying."
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.pop(snapshot_key, None)
+            st.session_state.pop(f"ptm_grid_editor::{snapshot_key}", None)
+            st.success(f"Saved {len(changes)} changed allocation cell(s).")
+            st.rerun()
+
+    st.markdown("#### Capacity summary")
+    summary = allocation_grid_summary(
+        department,
+        project_code,
+        start_week=start_week,
+        horizon_weeks=horizon,
+    )
+    if not summary.empty:
+        summary_config = {
+            week.isoformat(): st.column_config.NumberColumn(
+                week.strftime("%d %b"), format="%.1f"
+            )
+            for week in weeks
+        }
+        st.dataframe(
+            summary,
+            hide_index=True,
+            use_container_width=True,
+            column_config=summary_config,
+        )
+
+
 def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     init_planner_store()
     st.header("PTM Planner")
@@ -244,10 +431,7 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     with queue_tab:
         _work_queue(user, is_admin=is_admin)
     with planning_tab:
-        st.info(
-            "Department allocation grid is the next migration step. "
-            "Its writes will use the same row-level versioning as Manager Inputs."
-        )
+        _planning_grid(user)
     with teams_tab:
         st.info(
             "Teams Breakdown will be read from the same PostgreSQL allocation records, "
