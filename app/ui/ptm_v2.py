@@ -937,15 +937,25 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
         "Multi-user Planner foundation: source-controlled High Level facts, "
         "row-level manager writes, optimistic conflict protection and live presence."
     )
-    render_presence_bar()
-    queue_tab, planning_tab, teams_tab, people_tab = st.tabs(
-        ["Projects / Work Queue", "RS / GIS / PLS", "Teams Breakdown", "People / Time Off"]
+    section = st.segmented_control(
+        "Planner area",
+        ["Projects / Work Queue", "RS / GIS / PLS", "Teams Breakdown", "People / Time Off"],
+        default="Projects / Work Queue",
+        key="ptm_v2_section",
     )
-    with queue_tab:
+    # Render one PTM area only. This keeps grid edits fast and also makes presence
+    # reflect the screen the user is actually working in.
+    if section == "Projects / Work Queue":
         _work_queue(user, is_admin=is_admin)
-    with planning_tab:
+    elif section == "RS / GIS / PLS":
         _planning_grid(user)
-    with teams_tab:
+    elif section == "Teams Breakdown":
         _teams_breakdown()
-    with people_tab:
+    else:
+        st.session_state["ptm_presence_view"] = "People / Time Off"
+        st.session_state["ptm_presence_department"] = None
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "resources"
         _resource_management(user)
+
+    render_presence_bar()
