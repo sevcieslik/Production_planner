@@ -140,7 +140,7 @@ Configuration:
 - `HIGH_LEVEL_SPREADSHEET_ID`
 - `GOOGLE_SERVICE_ACCOUNT_JSON` (secret JSON string) or an equivalent secret-file mechanism
 
-The High Level spreadsheet must be shared with the service-account email as Viewer.
+The High Level spreadsheet must be shared with the service-account email as Editor because Planner publishes only to the controlled hidden import tabs. The `Projects` tab is treated as read-only by application code and is never written by the Planner.
 
 Sync maps the `Projects` tab by Project Code and performs upsert only on source-controlled fields. It must never overwrite manager-owned PTM fields.
 
@@ -187,6 +187,7 @@ Once a module is migrated and validated, the Planner database becomes the operat
 Configuration:
 
 - `GSHEETS_EXPORT_SPREADSHEET_ID`
+- `PTM_LEGACY_SPREADSHEET_ID` — temporary migration source for the current PTM View
 
 The export spreadsheet must be shared with the service-account email as Editor.
 
