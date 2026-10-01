@@ -124,6 +124,16 @@ def read_high_level_projects(
     return normalise_high_level_projects(rows)
 
 
+def _sheet_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.astimezone().strftime("%d/%m/%Y %H:%M:%S") if value.tzinfo else value.strftime("%d/%m/%Y %H:%M:%S")
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+    return value
+
+
 def replace_sheet_rows(
     records: Iterable[dict[str, Any]],
     *,
@@ -151,7 +161,7 @@ def replace_sheet_rows(
 
     values = [headers]
     for record in rows:
-        values.append([record.get(key, "") for key in headers])
+        values.append([_sheet_value(record.get(key, "")) for key in headers])
 
     worksheet.clear()
     if values and headers:
