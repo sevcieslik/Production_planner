@@ -108,6 +108,17 @@ planner_non_project_allocations = Table(
     PrimaryKeyConstraint("activity_name", "department", "person_name", "week_start"),
 )
 
+planner_calendar = Table(
+    "planner_calendar",
+    metadata,
+    Column("work_date", Date, primary_key=True),
+    Column("effective_working_day", Boolean, nullable=False),
+    Column("bank_holiday", Boolean, nullable=False, default=False),
+    Column("holiday_name", String(255)),
+    Column("source", String(128)),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 planner_people = Table(
     "planner_people",
     metadata,
@@ -736,6 +747,68 @@ def save_weekly_allocations_batch(
             saved_rows.append(dict(saved))
 
     return saved_rows
+
+
+def upsert_calendar_days(
+    records: Iterable[dict[str, Any]],
+    *,
+    engine: Engine | None = None,
+) -> dict[str, int]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    counts = {"inserted": 0, "updated": 0, "unchanged": 0}
+    now = _utcnow()
+    with engine.begin() as conn:
+        for record in records:
+            work_date = record.get("work_date")
+            if not isinstance(work_date, date):
+                continue
+            key = planner_calendar.c.work_date == work_date
+            values = {
+                "effective_working_day": bool(record.get("effective_working_day")),
+                "bank_holiday": bool(record.get("bank_holiday")),
+                "holiday_name": str(record.get("holiday_name") or "").strip() or None,
+                "source": str(record.get("source") or "").strip() or None,
+                "updated_at": now,
+            }
+            existing = conn.execute(select(planner_calendar).where(key)).mappings().first()
+            if existing is None:
+                conn.execute(insert(planner_calendar).values(work_date=work_date, **values))
+                counts["inserted"] += 1
+                continue
+            changed = any(
+                existing.get(field) != values[field]
+                for field in (
+                    "effective_working_day", "bank_holiday", "holiday_name", "source"
+                )
+            )
+            if not changed:
+                counts["unchanged"] += 1
+                continue
+            conn.execute(update(planner_calendar).where(key).values(**values))
+            counts["updated"] += 1
+    return counts
+
+
+def list_calendar_days(
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    stmt = select(planner_calendar)
+    conditions = []
+    if start_date:
+        conditions.append(planner_calendar.c.work_date >= start_date)
+    if end_date:
+        conditions.append(planner_calendar.c.work_date <= end_date)
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+    stmt = stmt.order_by(planner_calendar.c.work_date)
+    with engine.connect() as conn:
+        return [dict(row) for row in conn.execute(stmt).mappings().all()]
 
 
 def upsert_non_project_allocations(
