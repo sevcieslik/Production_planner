@@ -14,6 +14,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     MetaData,
     PrimaryKeyConstraint,
     String,
@@ -96,6 +97,10 @@ active_sessions = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+Index("idx_planner_allocations_week", planner_weekly_allocations.c.department, planner_weekly_allocations.c.week_start)
+Index("idx_planner_allocations_project", planner_weekly_allocations.c.project_code, planner_weekly_allocations.c.department)
+Index("idx_active_sessions_last_seen", active_sessions.c.last_seen_at)
+
 
 class AllocationConflict(RuntimeError):
     """Raised when another user changed an allocation after it was loaded."""
@@ -151,8 +156,6 @@ def get_engine(url: str | None = None) -> Engine:
 
 def reset_engine_cache() -> None:
     """Test/deployment helper used after changing DATABASE_URL."""
-    for engine in list(_engine_for_url.cache_info() and []):
-        engine.dispose()
     _engine_for_url.cache_clear()
 
 
@@ -308,14 +311,15 @@ def save_stage_input(
             if expected_version not in (None, 0):
                 raise StageInputConflict("Manager input no longer matches the loaded version.")
             try:
-                conn.execute(
-                    insert(planner_stage_inputs).values(
-                        project_code=project_code,
-                        department=department,
-                        version=1,
-                        **values,
+                with conn.begin_nested():
+                    conn.execute(
+                        insert(planner_stage_inputs).values(
+                            project_code=project_code,
+                            department=department,
+                            version=1,
+                            **values,
+                        )
                     )
-                )
             except IntegrityError as exc:
                 current = conn.execute(
                     select(planner_stage_inputs).where(
@@ -425,18 +429,19 @@ def save_weekly_allocation(
             if expected_version not in (None, 0):
                 raise AllocationConflict("Allocation no longer matches the loaded version.")
             try:
-                conn.execute(
-                    insert(planner_weekly_allocations).values(
-                        project_code=project_code,
-                        department=department,
-                        person_name=person_name,
-                        week_start=week_start,
-                        hours=hours,
-                        version=1,
-                        updated_by=user,
-                        updated_at=now,
+                with conn.begin_nested():
+                    conn.execute(
+                        insert(planner_weekly_allocations).values(
+                            project_code=project_code,
+                            department=department,
+                            person_name=person_name,
+                            week_start=week_start,
+                            hours=hours,
+                            version=1,
+                            updated_by=user,
+                            updated_at=now,
+                        )
                     )
-                )
             except IntegrityError as exc:
                 current = conn.execute(
                     select(planner_weekly_allocations).where(key)
