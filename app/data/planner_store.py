@@ -53,6 +53,17 @@ planner_projects = Table(
     Column("source_updated_at", DateTime(timezone=True), nullable=False),
 )
 
+planner_actuals = Table(
+    "planner_actuals",
+    metadata,
+    Column("project_code", String(64), ForeignKey("planner_projects.project_code", ondelete="CASCADE"), nullable=False),
+    Column("department", String(8), nullable=False),
+    Column("actual_hours", Float, nullable=False, default=0),
+    Column("source_name", String(128), nullable=False, default="DoT"),
+    Column("source_updated_at", DateTime(timezone=True), nullable=False),
+    PrimaryKeyConstraint("project_code", "department"),
+)
+
 planner_stage_inputs = Table(
     "planner_stage_inputs",
     metadata,
@@ -242,6 +253,69 @@ def upsert_high_level_projects(
             counts["updated"] += 1
 
     return counts
+
+
+def upsert_actual_hours(
+    records: Iterable[dict[str, Any]], engine: Engine | None = None
+) -> dict[str, int]:
+    """Upsert source-controlled actual hours by project and department."""
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    counts = {"inserted": 0, "updated": 0, "unchanged": 0}
+    now = _utcnow()
+
+    with engine.begin() as conn:
+        for raw in records:
+            code = str(raw.get("project_code") or "").strip()
+            if not code:
+                continue
+            department = _validate_department(raw.get("department"))
+            actual = round(max(float(raw.get("actual_hours") or 0), 0), 2)
+            source_name = str(raw.get("source_name") or "DoT").strip() or "DoT"
+            key = and_(
+                planner_actuals.c.project_code == code,
+                planner_actuals.c.department == department,
+            )
+            existing = conn.execute(select(planner_actuals).where(key)).mappings().first()
+            if existing is None:
+                conn.execute(
+                    insert(planner_actuals).values(
+                        project_code=code,
+                        department=department,
+                        actual_hours=actual,
+                        source_name=source_name,
+                        source_updated_at=now,
+                    )
+                )
+                counts["inserted"] += 1
+            elif (
+                float(existing["actual_hours"] or 0) != actual
+                or str(existing["source_name"] or "") != source_name
+            ):
+                conn.execute(
+                    update(planner_actuals)
+                    .where(key)
+                    .values(
+                        actual_hours=actual,
+                        source_name=source_name,
+                        source_updated_at=now,
+                    )
+                )
+                counts["updated"] += 1
+            else:
+                counts["unchanged"] += 1
+    return counts
+
+
+def actual_hours_map(*, engine: Engine | None = None) -> dict[tuple[str, str], float]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    with engine.connect() as conn:
+        rows = conn.execute(select(planner_actuals)).mappings().all()
+    return {
+        (str(row["project_code"]), str(row["department"])): float(row["actual_hours"] or 0)
+        for row in rows
+    }
 
 
 def list_projects(*, active_only: bool = True, engine: Engine | None = None) -> list[dict[str, Any]]:
