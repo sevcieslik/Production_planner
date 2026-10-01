@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.data.planner_store import (
     get_engine,
+    list_non_project_allocations,
     list_projects,
     list_weekly_allocations,
     save_weekly_allocations_batch,
@@ -49,6 +50,12 @@ def build_department_grid(
         end_week=weeks[-1],
         engine=engine,
     )
+    non_project = list_non_project_allocations(
+        department=department,
+        start_week=weeks[0],
+        end_week=weeks[-1],
+        engine=engine,
+    )
 
     available: dict[tuple[str, date], float] = defaultdict(float)
     roles: dict[str, str] = {}
@@ -73,6 +80,11 @@ def build_department_grid(
         if row["project_code"] == project_code:
             selected[(person, week)] += float(row.get("hours") or 0)
             versions[(person, week.isoformat())] = int(row.get("version") or 0)
+    for row in non_project:
+        person = row["person_name"]
+        week = row["week_start"]
+        people.add(person)
+        all_planned[(person, week)] += float(row.get("hours") or 0)
 
     output = []
     for person in sorted(people):
@@ -116,6 +128,12 @@ def allocation_grid_summary(
         end_week=weeks[-1],
         engine=engine,
     )
+    non_project = list_non_project_allocations(
+        department=department,
+        start_week=weeks[0],
+        end_week=weeks[-1],
+        engine=engine,
+    )
     team_capacity: dict[date, float] = defaultdict(float)
     selected_project: dict[date, float] = defaultdict(float)
     all_planned: dict[date, float] = defaultdict(float)
@@ -126,6 +144,8 @@ def allocation_grid_summary(
         all_planned[week] += float(row.get("hours") or 0)
         if row["project_code"] == project_code:
             selected_project[week] += float(row.get("hours") or 0)
+    for row in non_project:
+        all_planned[row["week_start"]] += float(row.get("hours") or 0)
 
     summary = []
     for label, values in (
