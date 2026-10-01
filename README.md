@@ -76,15 +76,18 @@ The **PTM Planner** tab currently provides:
 - PostgreSQL via `PLANNER_DATABASE_URL` or `DATABASE_URL`, with SQLite fallback for local development.
 
 The High Level sheet remains authoritative for project facts and bid hours. Manager
-planning fields are authoritative in the Planner database.
+planning fields are authoritative in the Planner database. The Google service account
+needs Editor access to High Level because Planner publishes to the controlled hidden
+import tabs; application code never writes to the High Level `Projects` tab.
 
 ### Additional environment variables
 
 ```text
 PLANNER_DATABASE_URL=<Render PostgreSQL internal URL>
 HIGH_LEVEL_SPREADSHEET_ID=<High Level Google Sheet ID>
+PTM_LEGACY_SPREADSHEET_ID=<current PTM View Google Sheet ID; migration only>
 GOOGLE_SERVICE_ACCOUNT_JSON=<service account JSON secret>
-GSHEETS_EXPORT_SPREADSHEET_ID=<optional reporting/export Google Sheet ID>
+GSHEETS_EXPORT_SPREADSHEET_ID=<optional separate reporting/export Google Sheet ID>
 ```
 
 During migration, `PLANNER_DATABASE_URL` can point the new PTM store at PostgreSQL
