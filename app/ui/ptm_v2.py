@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from uuid import uuid4
 
 import pandas as pd
@@ -19,6 +19,7 @@ from app.data.planner_store import (
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
 from app.services.high_level_sync import sync_high_level_projects
+from app.services.ptm_migration import migrate_ptm_snapshot
 from app.services.ptm_planner_grid import (
     allocation_grid_summary,
     build_department_grid,
@@ -123,7 +124,8 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
     st.session_state["ptm_presence_view"] = "Projects / Work Queue"
 
     if is_admin:
-        if c3.button("Sync High Level now", key="ptm_high_level_sync"):
+        sync_col, migrate_col = c3.columns(2)
+        if sync_col.button("Sync High Level now", key="ptm_high_level_sync"):
             try:
                 result = sync_high_level_projects()
             except GoogleSheetsConfigurationError as exc:
@@ -135,6 +137,26 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
                     f"High Level synced: {result['inserted']} new, "
                     f"{result['updated']} updated, {result['unchanged']} unchanged."
                 )
+                st.rerun()
+        if migrate_col.button("Import current PTM snapshot", key="ptm_legacy_migration"):
+            try:
+                sync_high_level_projects()
+                result = migrate_ptm_snapshot(user=user)
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"PTM migration failed: {exc}")
+            else:
+                st.success(
+                    "PTM snapshot imported without overwriting existing Planner edits. "
+                    f"People: {result['people']['inserted']} new / {result['people']['updated']} updated; "
+                    f"project allocations: {result['project_allocations_inserted']} new."
+                )
+                if result["skipped_people"]:
+                    st.warning(
+                        "Skipped roster records without a valid RS/GIS/PLS home department: "
+                        + ", ".join(result["skipped_people"])
+                    )
                 st.rerun()
 
     try:
@@ -253,13 +275,11 @@ def _planning_grid(user: str) -> None:
         top2.selectbox("Horizon", [4, 8, 12, 16, 26], index=2, format_func=lambda n: f"{n} weeks")
     )
     today = date.today()
-    default_start = today - pd.Timedelta(days=today.weekday())
+    default_start = today - timedelta(days=today.weekday())
     start_week = top3.date_input("Planning start", default_start)
     if isinstance(start_week, pd.Timestamp):
         start_week = start_week.date()
-    start_week = start_week - pd.Timedelta(days=start_week.weekday())
-    if isinstance(start_week, pd.Timestamp):
-        start_week = start_week.date()
+    start_week = start_week - timedelta(days=start_week.weekday())
 
     queue = build_work_queue()[department]
     if not queue:
