@@ -329,6 +329,13 @@ def list_projects(*, active_only: bool = True, engine: Engine | None = None) -> 
         return [dict(row) for row in conn.execute(stmt).mappings().all()]
 
 
+def list_stage_inputs(*, engine: Engine | None = None) -> list[dict[str, Any]]:
+    engine = engine or get_engine()
+    init_planner_store(engine)
+    with engine.connect() as conn:
+        return [dict(row) for row in conn.execute(select(planner_stage_inputs)).mappings().all()]
+
+
 def get_stage_input(
     project_code: str, department: str, *, engine: Engine | None = None
 ) -> dict[str, Any] | None:
