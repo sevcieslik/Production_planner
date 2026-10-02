@@ -17,6 +17,10 @@ from app.services.ptm_capacity import weekly_person_capacity, week_starts
 from app.services.ptm_work_queue import build_work_queue
 
 
+def _helper_name(kind: str, week: date) -> str:
+    return f"__{kind}__{week.isoformat()}"
+
+
 def build_department_grid(
     department: str,
     project_code: str,
@@ -99,7 +103,13 @@ def build_department_grid(
             "Time Off": any(time_off.get((person, week), False) for week in weeks),
         }
         for week in weeks:
-            row[week.isoformat()] = round(selected[(person, week)], 1)
+            selected_hours = round(selected[(person, week)], 1)
+            row[week.isoformat()] = selected_hours
+            row[_helper_name("available", week)] = round(available[(person, week)], 1)
+            row[_helper_name("other", week)] = round(
+                max(all_planned[(person, week)] - selected[(person, week)], 0), 1
+            )
+            row[_helper_name("timeoff", week)] = bool(time_off.get((person, week), False))
         output.append(row)
 
     return pd.DataFrame(output), versions, weeks
@@ -165,6 +175,211 @@ def allocation_grid_summary(
     return pd.DataFrame(summary)
 
 
+def build_team_project_matrix(
+    department: str,
+    *,
+    start_week: date,
+    horizon_weeks: int,
+    engine=None,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[date]]:
+    """Show every project/activity consuming a department's hours across the horizon."""
+    engine = engine or get_engine()
+    department = str(department).upper()
+    weeks = week_starts(start_week, horizon_weeks)
+    if not weeks:
+        return pd.DataFrame(), pd.DataFrame(), []
+
+    projects = {
+        row["project_code"]: row["project_name"]
+        for row in list_projects(active_only=False, engine=engine)
+    }
+    queue = {
+        row["Project Code"]: row for row in build_work_queue(engine=engine)[department]
+    }
+    allocations = list_weekly_allocations(
+        department=department,
+        start_week=weeks[0],
+        end_week=weeks[-1],
+        engine=engine,
+    )
+    non_project = list_non_project_allocations(
+        department=department,
+        start_week=weeks[0],
+        end_week=weeks[-1],
+        engine=engine,
+    )
+
+    project_week: dict[tuple[str, date], float] = defaultdict(float)
+    for row in allocations:
+        project_week[(row["project_code"], row["week_start"])] += float(row.get("hours") or 0)
+
+    rows: list[dict[str, Any]] = []
+    project_codes = set(queue) | {row["project_code"] for row in allocations}
+    for code in sorted(project_codes, key=lambda value: (projects.get(value, value), value)):
+        total = round(sum(project_week[(code, week)] for week in weeks), 1)
+        work = queue.get(code)
+        remaining = None if work is None else work.get("Remaining h")
+        if total <= 0 and (remaining is None or float(remaining) <= 0):
+            continue
+        row: dict[str, Any] = {
+            "Project Code": code,
+            "Project / Activity": projects.get(code, code),
+            "Type": "PROJECT",
+            "Remaining h": remaining,
+            "Planned h": total,
+            "Gap vs Remaining": None if remaining is None else round(total - float(remaining), 1),
+        }
+        for week in weeks:
+            row[week.isoformat()] = round(project_week[(code, week)], 1)
+        rows.append(row)
+
+    activity_week: dict[tuple[str, date], float] = defaultdict(float)
+    for item in non_project:
+        activity_week[(item["activity_name"], item["week_start"])] += float(item.get("hours") or 0)
+    for activity in sorted({row["activity_name"] for row in non_project}):
+        total = round(sum(activity_week[(activity, week)] for week in weeks), 1)
+        if total <= 0:
+            continue
+        row = {
+            "Project Code": "",
+            "Project / Activity": f"ACTIVITY: {activity}",
+            "Type": "ACTIVITY",
+            "Remaining h": None,
+            "Planned h": total,
+            "Gap vs Remaining": None,
+        }
+        for week in weeks:
+            row[week.isoformat()] = round(activity_week[(activity, week)], 1)
+        rows.append(row)
+
+    capacity = allocation_grid_summary(
+        department,
+        next(iter(project_codes), next(iter(queue), "")) if (project_codes or queue) else "",
+        start_week=start_week,
+        horizon_weeks=horizon_weeks,
+        engine=engine,
+    ) if (project_codes or queue) else pd.DataFrame()
+
+    if not capacity.empty:
+        capacity = capacity[capacity["Summary"].isin(["TOTAL PLANNED", "TEAM CAPACITY", "FREE / OVER"])]
+
+    return pd.DataFrame(rows), capacity, weeks
+
+
+def build_processor_project_matrix(
+    department: str,
+    person_name: str,
+    *,
+    start_week: date,
+    horizon_weeks: int,
+    engine=None,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[date], list[str]]:
+    """Show one processor's projects/activities and weekly availability."""
+    engine = engine or get_engine()
+    department = str(department).upper()
+    weeks = week_starts(start_week, horizon_weeks)
+    if not weeks:
+        return pd.DataFrame(), pd.DataFrame(), [], []
+
+    capacity_rows = weekly_person_capacity(
+        start_week,
+        horizon_weeks,
+        department=department,
+        engine=engine,
+    )
+    people = sorted({
+        row["person_name"]
+        for row in capacity_rows
+        if float(row.get("available_hours") or 0) > 0 or row["person_name"] == person_name
+    })
+    if not person_name and people:
+        person_name = people[0]
+
+    projects = {
+        row["project_code"]: row["project_name"]
+        for row in list_projects(active_only=False, engine=engine)
+    }
+    allocations = [
+        row
+        for row in list_weekly_allocations(
+            department=department,
+            start_week=weeks[0],
+            end_week=weeks[-1],
+            engine=engine,
+        )
+        if row["person_name"] == person_name
+    ]
+    non_project = [
+        row
+        for row in list_non_project_allocations(
+            department=department,
+            start_week=weeks[0],
+            end_week=weeks[-1],
+            engine=engine,
+        )
+        if row["person_name"] == person_name
+    ]
+
+    project_week: dict[tuple[str, date], float] = defaultdict(float)
+    for row in allocations:
+        project_week[(row["project_code"], row["week_start"])] += float(row.get("hours") or 0)
+
+    rows: list[dict[str, Any]] = []
+    for code in sorted({row["project_code"] for row in allocations}, key=lambda value: projects.get(value, value)):
+        total = round(sum(project_week[(code, week)] for week in weeks), 1)
+        row: dict[str, Any] = {
+            "Project Code": code,
+            "Project / Activity": projects.get(code, code),
+            "Type": "PROJECT",
+            "Total h": total,
+        }
+        for week in weeks:
+            row[week.isoformat()] = round(project_week[(code, week)], 1)
+        rows.append(row)
+
+    activity_week: dict[tuple[str, date], float] = defaultdict(float)
+    for item in non_project:
+        activity_week[(item["activity_name"], item["week_start"])] += float(item.get("hours") or 0)
+    for activity in sorted({row["activity_name"] for row in non_project}):
+        total = round(sum(activity_week[(activity, week)] for week in weeks), 1)
+        row = {
+            "Project Code": "",
+            "Project / Activity": f"ACTIVITY: {activity}",
+            "Type": "ACTIVITY",
+            "Total h": total,
+        }
+        for week in weeks:
+            row[week.isoformat()] = round(activity_week[(activity, week)], 1)
+        rows.append(row)
+
+    available: dict[date, float] = defaultdict(float)
+    for row in capacity_rows:
+        if row["person_name"] == person_name:
+            available[row["week_start"]] += float(row.get("available_hours") or 0)
+
+    planned: dict[date, float] = defaultdict(float)
+    for row in allocations:
+        planned[row["week_start"]] += float(row.get("hours") or 0)
+    for row in non_project:
+        planned[row["week_start"]] += float(row.get("hours") or 0)
+
+    summary_rows = []
+    for label, values in (
+        ("AVAILABLE", available),
+        ("PLANNED", planned),
+    ):
+        item: dict[str, Any] = {"Summary": label}
+        for week in weeks:
+            item[week.isoformat()] = round(values[week], 1)
+        summary_rows.append(item)
+    free = {"Summary": "FREE / OVER"}
+    for week in weeks:
+        free[week.isoformat()] = round(available[week] - planned[week], 1)
+    summary_rows.append(free)
+
+    return pd.DataFrame(rows), pd.DataFrame(summary_rows), weeks, people
+
+
 def changed_grid_cells(
     original: pd.DataFrame,
     edited: pd.DataFrame,
@@ -174,7 +389,7 @@ def changed_grid_cells(
     weeks: list[date],
     versions: dict[tuple[str, str], int],
 ) -> list[dict[str, Any]]:
-    """Diff Streamlit's edited grid and return only changed allocation cells."""
+    """Diff the edited grid and return only changed allocation cells."""
     if original.empty and edited.empty:
         return []
 
