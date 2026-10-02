@@ -490,19 +490,150 @@ def _planning_grid(user: str) -> None:
         st.info("Sync High Level projects before planning.")
         return
 
-    top1, top2, top3 = st.columns([2, 2, 3])
+    top1, top2, top3, top4 = st.columns([1.4, 1.4, 2, 3])
     department = top1.segmented_control(
         "Department", DEPARTMENTS, default="RS", key="ptm_grid_department"
     )
     horizon = int(
-        top2.selectbox("Horizon", [4, 8, 12, 16, 26], index=2, format_func=lambda n: f"{n} weeks")
+        top2.selectbox(
+            "Horizon",
+            [4, 8, 12, 16, 26],
+            index=2,
+            format_func=lambda n: f"{n} weeks",
+            key="ptm_grid_horizon",
+        )
     )
     today = date.today()
     default_start = today - timedelta(days=today.weekday())
-    start_week = top3.date_input("Planning start", default_start)
+    start_week = top3.date_input("Planning start", default_start, key="ptm_grid_start")
     if isinstance(start_week, pd.Timestamp):
         start_week = start_week.date()
     start_week = start_week - timedelta(days=start_week.weekday())
+    view_mode = top4.segmented_control(
+        "Planner view",
+        ["Selected project", "Team by project", "Processor drill-down"],
+        default="Selected project",
+        key="ptm_grid_view_mode",
+    )
+
+    st.session_state["ptm_presence_view"] = f"Planner {department}"
+    st.session_state["ptm_presence_department"] = department
+
+    if view_mode == "Team by project":
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "team overview"
+        frame, summary, weeks = build_team_project_matrix(
+            department,
+            start_week=start_week,
+            horizon_weeks=horizon,
+        )
+        st.caption(
+            "All project and non-project hours for the selected team. "
+            "This is the department-level view of where the team's time is going."
+        )
+        if frame.empty:
+            st.info("No project or activity hours match this team and horizon.")
+        else:
+            total_planned = float(frame["Planned h"].fillna(0).sum())
+            free_row = (
+                summary[summary["Summary"] == "FREE / OVER"]
+                if not summary.empty else pd.DataFrame()
+            )
+            free_total = (
+                float(free_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+                if not free_row.empty else 0.0
+            )
+            capacity_row = (
+                summary[summary["Summary"] == "TEAM CAPACITY"]
+                if not summary.empty else pd.DataFrame()
+            )
+            capacity_total = (
+                float(capacity_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+                if not capacity_row.empty else 0.0
+            )
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Team capacity", f"{capacity_total:,.1f} h")
+            m2.metric("Planned", f"{total_planned:,.1f} h")
+            m3.metric("Free / over", f"{free_total:,.1f} h")
+            week_columns = [week.isoformat() for week in weeks]
+            _readonly_grid(
+                frame,
+                week_columns=week_columns,
+                key=f"ptm_team_project::{department}::{start_week}::{horizon}",
+                fixed_department=department,
+                gap_field="Gap vs Remaining",
+            )
+            st.markdown("#### Capacity summary")
+            _readonly_grid(
+                summary,
+                week_columns=week_columns,
+                key=f"ptm_team_project_summary::{department}::{start_week}::{horizon}",
+                summary_field="Summary",
+            )
+        return
+
+    if view_mode == "Processor drill-down":
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "processor drill-down"
+        capacity_rows = weekly_person_capacity(
+            start_week,
+            horizon,
+            department=department,
+        )
+        people = sorted({row["person_name"] for row in capacity_rows})
+        if not people:
+            st.info(f"No processors are available in {department} for this horizon.")
+            return
+        person = st.selectbox(
+            "Processor",
+            people,
+            key=f"ptm_processor_drilldown::{department}",
+        )
+        frame, summary, weeks, _ = build_processor_project_matrix(
+            department,
+            person,
+            start_week=start_week,
+            horizon_weeks=horizon,
+        )
+        week_columns = [week.isoformat() for week in weeks]
+        available_row = summary[summary["Summary"] == "AVAILABLE"]
+        planned_row = summary[summary["Summary"] == "PLANNED"]
+        free_row = summary[summary["Summary"] == "FREE / OVER"]
+        available_total = (
+            float(available_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not available_row.empty else 0.0
+        )
+        planned_total = (
+            float(planned_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not planned_row.empty else 0.0
+        )
+        free_total = (
+            float(free_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not free_row.empty else 0.0
+        )
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Available", f"{available_total:,.1f} h")
+        m2.metric("Planned", f"{planned_total:,.1f} h")
+        m3.metric("Free / over", f"{free_total:,.1f} h")
+
+        with st.expander(f"{person} · project / activity breakdown", expanded=True):
+            if frame.empty:
+                st.info("No project or activity hours are allocated to this processor in the selected horizon.")
+            else:
+                _readonly_grid(
+                    frame,
+                    week_columns=week_columns,
+                    key=f"ptm_processor_matrix::{department}::{person}::{start_week}::{horizon}",
+                    fixed_department=department,
+                )
+            st.markdown("##### Weekly availability")
+            _readonly_grid(
+                summary,
+                week_columns=week_columns,
+                key=f"ptm_processor_summary::{department}::{person}::{start_week}::{horizon}",
+                summary_field="Summary",
+            )
+        return
 
     queue = build_work_queue()[department]
     if not queue:
@@ -514,8 +645,6 @@ def _planning_grid(user: str) -> None:
     selected_label = st.selectbox("Project", list(choices), key="ptm_grid_project")
     project_code = choices[selected_label]
 
-    st.session_state["ptm_presence_view"] = f"Planner {department}"
-    st.session_state["ptm_presence_department"] = department
     st.session_state["ptm_presence_project"] = project_code
     st.session_state["ptm_presence_scope"] = "weekly allocations"
     heartbeat_session(
@@ -564,37 +693,100 @@ def _planning_grid(user: str) -> None:
     if original.empty:
         st.warning(
             "No processors are available in this department yet. "
-            "Roster / temporary assignments can be added in the Resource migration step."
+            "Roster / temporary assignments can be added in People / Time Off."
         )
         return
 
-    week_columns = [week.isoformat() for week in weeks]
-    disabled = ["Person", "Role", "H Available", "H Left", "Time Off"]
-    column_config = {
-        "H Available": st.column_config.NumberColumn(format="%.1f"),
-        "H Left": st.column_config.NumberColumn(format="%.1f"),
-        "Time Off": st.column_config.CheckboxColumn(),
-    }
+    _planner_legend()
+    st.caption(
+        "Edit the selected project's hours directly in the weekly cells. Only changed cells are saved. "
+        "If another manager saves the same person/week/project first, your stale save is rejected."
+    )
+
+    gb = GridOptionsBuilder.from_dataframe(original)
+    gb.configure_default_column(
+        editable=False,
+        sortable=False,
+        filter=False,
+        resizable=True,
+        suppressMenu=True,
+    )
+    gb.configure_column("Person", pinned="left", minWidth=180)
+    gb.configure_column("Role", pinned="left", minWidth=180)
+    gb.configure_column(
+        "H Available",
+        pinned="left",
+        width=105,
+        type=["numericColumn"],
+        valueFormatter="Number(value).toFixed(1)",
+    )
+    gb.configure_column(
+        "H Left",
+        pinned="left",
+        width=90,
+        type=["numericColumn"],
+        valueFormatter="Number(value).toFixed(1)",
+        cellStyle=JsCode(
+            f"""
+            function(params) {{
+              const value = Number(params.value || 0);
+              if (value < -0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+              if (value <= 0.01) return {{backgroundColor:'{GRID_COLOURS["no_headroom"]}'}};
+              return {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+            }}
+            """
+        ),
+    )
+    gb.configure_column("Time Off", pinned="left", width=85)
+
     for week in weeks:
-        column_config[week.isoformat()] = st.column_config.NumberColumn(
-            week.strftime("%d %b"),
-            min_value=0.0,
-            step=0.5,
-            format="%.1f",
+        week_key = week.isoformat()
+        avail_key = f"__available__{week_key}"
+        other_key = f"__other__{week_key}"
+        off_key = f"__timeoff__{week_key}"
+        for helper in (avail_key, other_key, off_key):
+            gb.configure_column(helper, hide=True)
+        gb.configure_column(
+            week_key,
+            header_name=week.strftime("%d %b"),
+            width=82,
+            editable=True,
+            type=["numericColumn"],
+            valueFormatter="Number(value || 0).toFixed(1)",
+            cellStyle=JsCode(
+                f"""
+                function(params) {{
+                  const avail = Number(params.data['{avail_key}'] || 0);
+                  const other = Number(params.data['{other_key}'] || 0);
+                  const value = Number(params.value || 0);
+                  const total = other + value;
+                  const timeOff = Boolean(params.data['{off_key}']);
+                  if (total > avail + 0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+                  if (timeOff) return {{backgroundColor:'{GRID_COLOURS["time_off"]}'}};
+                  if (avail <= 0.01) return {{backgroundColor:'{GRID_COLOURS["unavailable"]}', color:'#6b7280'}};
+                  if (Math.abs(total - avail) <= 0.01) return {{backgroundColor:'{GRID_COLOURS["no_headroom"]}'}};
+                  if (value > 0) return {{backgroundColor:'{GRID_COLOURS["editable"]}'}};
+                  return {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+                }}
+                """
+            ),
         )
 
-    st.caption(
-        "Edits stay in your session until Save changes. Only changed cells are written. "
-        "If another manager saves the same cell first, your save is rejected rather than overwriting it."
-    )
-    edited = st.data_editor(
+    grid_options = gb.build()
+    grid_options["domLayout"] = "autoHeight"
+    grid_options["rowHeight"] = 32
+    grid_options["headerHeight"] = 36
+
+    response = AgGrid(
         original,
-        hide_index=True,
-        use_container_width=True,
-        disabled=disabled,
-        column_config=column_config,
+        gridOptions=grid_options,
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=False,
+        theme="streamlit",
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         key=f"ptm_grid_editor::{snapshot_key}",
     )
+    edited = pd.DataFrame(response["data"])
 
     changes = changed_grid_cells(
         original,
@@ -613,10 +805,9 @@ def _planning_grid(user: str) -> None:
     )
     if reload_col.button("Reload latest", key=f"ptm_grid_reload::{snapshot_key}"):
         st.session_state.pop(snapshot_key, None)
-        st.session_state.pop(f"ptm_grid_editor::{snapshot_key}", None)
         st.rerun()
     info_col.caption(
-        "Snapshot is intentionally held stable while you edit; Reload latest discards unsaved local edits."
+        "Snapshot is held stable while you edit. Reload latest discards unsaved local edits."
     )
 
     if save_clicked:
@@ -634,7 +825,6 @@ def _planning_grid(user: str) -> None:
             st.error(str(exc))
         else:
             st.session_state.pop(snapshot_key, None)
-            st.session_state.pop(f"ptm_grid_editor::{snapshot_key}", None)
             st.success(f"Saved {len(changes)} changed allocation cell(s).")
             st.rerun()
 
@@ -646,19 +836,12 @@ def _planning_grid(user: str) -> None:
         horizon_weeks=horizon,
     )
     if not summary.empty:
-        summary_config = {
-            week.isoformat(): st.column_config.NumberColumn(
-                week.strftime("%d %b"), format="%.1f"
-            )
-            for week in weeks
-        }
-        st.dataframe(
+        _readonly_grid(
             summary,
-            hide_index=True,
-            use_container_width=True,
-            column_config=summary_config,
+            week_columns=[week.isoformat() for week in weeks],
+            key=f"ptm_grid_summary::{snapshot_key}",
+            summary_field="Summary",
         )
-
 
 def _teams_breakdown() -> None:
     st.subheader("Teams Breakdown")
