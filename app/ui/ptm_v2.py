@@ -117,6 +117,7 @@ def _readonly_grid(
         filter=False,
         resizable=True,
         suppressMenu=True,
+        minWidth=58,
     )
 
     for column in frame.columns:
@@ -168,20 +169,36 @@ def _readonly_grid(
             gb.configure_column(
                 column,
                 header_name=date.fromisoformat(column).strftime("%d %b"),
-                width=82,
+                width=78,
+                minWidth=74,
+                maxWidth=96,
                 type=["numericColumn"],
                 valueFormatter="value == null ? '' : Number(value).toFixed(1)",
                 cellStyle=cell_style,
             )
 
     if "Project / Activity" in frame.columns:
-        gb.configure_column("Project / Activity", pinned="left", minWidth=180)
+        gb.configure_column(
+            "Project / Activity", pinned="left", width=168, minWidth=145, maxWidth=220
+        )
     if "Person" in frame.columns:
-        gb.configure_column("Person", pinned="left", minWidth=180)
+        gb.configure_column("Person", pinned="left", width=170, minWidth=150)
     if "Project Code" in frame.columns:
-        gb.configure_column("Project Code", pinned="left", width=115)
+        gb.configure_column("Project Code", pinned="left", width=96, minWidth=88, maxWidth=108)
+    if "Dept" in frame.columns:
+        gb.configure_column("Dept", width=58, minWidth=54, maxWidth=66)
+    if "Remaining h" in frame.columns:
+        gb.configure_column("Remaining h", width=88, minWidth=82, maxWidth=98)
+    if "Assigned h" in frame.columns:
+        gb.configure_column("Assigned h", width=82, minWidth=76, maxWidth=92)
+    if "Gap vs Remaining" in frame.columns:
+        gb.configure_column("Gap vs Remaining", width=102, minWidth=94, maxWidth=112)
+    if "Actual h" in frame.columns:
+        gb.configure_column("Actual h", width=80, minWidth=74, maxWidth=92)
+    if "Type" in frame.columns:
+        gb.configure_column("Type", width=76, minWidth=70, maxWidth=88)
     if "Group" in frame.columns:
-        gb.configure_column("Group", pinned="left", width=80)
+        gb.configure_column("Group", hide=True)
     if gap_field and gap_field in frame.columns:
         gb.configure_column(
             gap_field,
@@ -202,6 +219,27 @@ def _readonly_grid(
     options["domLayout"] = "autoHeight"
     options["rowHeight"] = 32
     options["headerHeight"] = 36
+    minimum_width = 610 + (78 * len(week_columns))
+    options["onGridSizeChanged"] = JsCode(
+        f"""
+        function(params) {{
+          if (params.clientWidth >= {minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
+    options["onFirstDataRendered"] = JsCode(
+        f"""
+        function(params) {{
+          const host = params.api.getGui ? params.api.getGui() : null;
+          const clientWidth = host ? host.clientWidth : 0;
+          if (clientWidth >= {minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
     options["suppressRowHoverHighlight"] = False
 
     AgGrid(
@@ -776,6 +814,16 @@ def _planning_grid(user: str) -> None:
     grid_options["domLayout"] = "autoHeight"
     grid_options["rowHeight"] = 32
     grid_options["headerHeight"] = 36
+    editable_minimum_width = 640 + (78 * len(weeks))
+    grid_options["onGridSizeChanged"] = JsCode(
+        f"""
+        function(params) {{
+          if (params.clientWidth >= {editable_minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
 
     response = AgGrid(
         original,
@@ -912,8 +960,11 @@ def _teams_breakdown() -> None:
             config[column] = st.column_config.NumberColumn(
                 date.fromisoformat(column).strftime("%d %b"), format="%.1f"
             )
+        display_frame = frame.drop(columns=["Group"], errors="ignore")
+        if scope == "Projects Only":
+            display_frame = display_frame.drop(columns=["Type"], errors="ignore")
         _readonly_grid(
-            frame,
+            display_frame,
             week_columns=week_columns,
             key=(
                 f"ptm_teams_breakdown::{view_mode}::{department}::{scope}::"
