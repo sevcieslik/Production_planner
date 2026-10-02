@@ -12,6 +12,7 @@ from app.services.ptm_planner_grid import (
     build_processor_project_matrix,
     build_team_project_matrix,
     changed_grid_cells,
+    changed_processor_matrix_cells,
     save_grid_changes,
 )
 from app.services.ptm_resources import save_person
@@ -170,7 +171,7 @@ def test_team_by_project_and_processor_drilldown_share_allocation_records():
     assert summary_rows["TOTAL PLANNED"][team_weeks[0].isoformat()] == 24
     assert summary_rows["TEAM CAPACITY"][team_weeks[0].isoformat()] == 40
 
-    detail, detail_summary, detail_weeks, people = build_processor_project_matrix(
+    detail, detail_summary, detail_weeks, people, versions = build_processor_project_matrix(
         "GIS",
         "User, Test",
         start_week=date(2026, 10, 5),
@@ -183,3 +184,48 @@ def test_team_by_project_and_processor_drilldown_share_allocation_records():
     detail_rows = {row["Summary"]: row for row in detail_summary.to_dict("records")}
     assert detail_rows["PLANNED"][detail_weeks[0].isoformat()] == 24
     assert detail_rows["FREE / OVER"][detail_weeks[0].isoformat()] == 16
+
+
+def test_processor_drilldown_diff_saves_project_cells_only():
+    engine = _engine()
+    _seed(engine)
+    original, versions, weeks = build_department_grid(
+        "GIS", "NM1", start_week=date(2026, 10, 5), horizon_weeks=1, engine=engine
+    )
+    edited = original.copy()
+    edited.loc[0, weeks[0].isoformat()] = 8
+    save_grid_changes(
+        changed_grid_cells(
+            original,
+            edited,
+            project_code="NM1",
+            department="GIS",
+            weeks=weeks,
+            versions=versions,
+        ),
+        user="Dom",
+        engine=engine,
+    )
+
+    detail, _, detail_weeks, _, detail_versions = build_processor_project_matrix(
+        "GIS",
+        "User, Test",
+        start_week=date(2026, 10, 5),
+        horizon_weeks=1,
+        engine=engine,
+    )
+    changed = detail.copy()
+    changed.loc[changed["Project Code"] == "NM1", detail_weeks[0].isoformat()] = 12
+
+    changes = changed_processor_matrix_cells(
+        detail,
+        changed,
+        department="GIS",
+        person_name="User, Test",
+        weeks=detail_weeks,
+        versions=detail_versions,
+    )
+    assert len(changes) == 1
+    assert changes[0]["project_code"] == "NM1"
+    assert changes[0]["hours"] == 12
+    assert changes[0]["expected_version"] == 1
