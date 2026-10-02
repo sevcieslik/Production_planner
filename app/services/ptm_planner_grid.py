@@ -252,18 +252,36 @@ def build_team_project_matrix(
             row[week.isoformat()] = round(activity_week[(activity, week)], 1)
         rows.append(row)
 
-    capacity = allocation_grid_summary(
-        department,
-        next(iter(project_codes), next(iter(queue), "")) if (project_codes or queue) else "",
-        start_week=start_week,
-        horizon_weeks=horizon_weeks,
+    capacity_rows = weekly_person_capacity(
+        start_week,
+        horizon_weeks,
+        department=department,
         engine=engine,
-    ) if (project_codes or queue) else pd.DataFrame()
+    )
+    team_capacity: dict[date, float] = defaultdict(float)
+    all_planned: dict[date, float] = defaultdict(float)
+    for item in capacity_rows:
+        team_capacity[item["week_start"]] += float(item.get("available_hours") or 0)
+    for item in allocations:
+        all_planned[item["week_start"]] += float(item.get("hours") or 0)
+    for item in non_project:
+        all_planned[item["week_start"]] += float(item.get("hours") or 0)
 
-    if not capacity.empty:
-        capacity = capacity[capacity["Summary"].isin(["TOTAL PLANNED", "TEAM CAPACITY", "FREE / OVER"])]
+    summary_rows = []
+    for label, values in (
+        ("TOTAL PLANNED", all_planned),
+        ("TEAM CAPACITY", team_capacity),
+    ):
+        summary_row: dict[str, Any] = {"Summary": label}
+        for week in weeks:
+            summary_row[week.isoformat()] = round(values[week], 1)
+        summary_rows.append(summary_row)
+    free_row: dict[str, Any] = {"Summary": "FREE / OVER"}
+    for week in weeks:
+        free_row[week.isoformat()] = round(team_capacity[week] - all_planned[week], 1)
+    summary_rows.append(free_row)
 
-    return pd.DataFrame(rows), capacity, weeks
+    return pd.DataFrame(rows), pd.DataFrame(summary_rows), weeks
 
 
 def build_processor_project_matrix(
