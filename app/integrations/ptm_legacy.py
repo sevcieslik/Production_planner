@@ -38,8 +38,45 @@ def _number(value: Any, default: float | None = None) -> float | None:
         return default
 
 
+def _values_to_records(values: list[list[Any]]) -> list[dict[str, Any]]:
+    """
+    Convert a worksheet matrix to records without requiring every header cell to
+    be populated or unique.
+
+    Legacy PTM sheets contain spare formatted columns with blank headers. gspread's
+    get_all_records() rejects those as duplicate headers (duplicate ""). We only
+    import named columns and keep the first occurrence of a duplicate named header.
+    """
+    if not values:
+        return []
+
+    raw_headers = values[0]
+    header_positions: list[tuple[int, str]] = []
+    seen: set[str] = set()
+
+    for index, raw_header in enumerate(raw_headers):
+        header = _text(raw_header)
+        if not header or header in seen:
+            continue
+        seen.add(header)
+        header_positions.append((index, header))
+
+    records: list[dict[str, Any]] = []
+    for raw_row in values[1:]:
+        record = {
+            header: raw_row[index] if index < len(raw_row) else ""
+            for index, header in header_positions
+        }
+        if any(value not in ("", None) for value in record.values()):
+            records.append(record)
+    return records
+
+
 def _records(spreadsheet: gspread.Spreadsheet, sheet_name: str) -> list[dict[str, Any]]:
-    return spreadsheet.worksheet(sheet_name).get_all_records(default_blank="")
+    values = spreadsheet.worksheet(sheet_name).get_all_values(
+        value_render_option="UNFORMATTED_VALUE"
+    )
+    return _values_to_records(values)
 
 
 def read_legacy_ptm_snapshot(
