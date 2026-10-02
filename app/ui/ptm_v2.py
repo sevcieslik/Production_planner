@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 from app.data.planner_store import (
     AllocationConflict,
@@ -27,6 +28,8 @@ from app.services.ptm_migration import migrate_ptm_snapshot
 from app.services.ptm_planner_grid import (
     allocation_grid_summary,
     build_department_grid,
+    build_processor_project_matrix,
+    build_team_project_matrix,
     changed_grid_cells,
     project_workload_card,
     save_grid_changes,
@@ -45,6 +48,20 @@ from app.services.ptm_work_queue import build_work_queue
 
 DEPARTMENTS = ("RS", "GIS", "PLS")
 
+DEPT_TINTS = {
+    "RS": "#d9eaf7",
+    "GIS": "#d9ead3",
+    "PLS": "#fce5cd",
+}
+GRID_COLOURS = {
+    "editable": "#fff2cc",
+    "available": "#d9ead3",
+    "no_headroom": "#cfe2f3",
+    "unavailable": "#d9d9d9",
+    "over": "#f4cccc",
+    "time_off": "#d9d2e9",
+}
+
 
 def _presence_session_id() -> str:
     key = "ptm_presence_session_id"
@@ -60,6 +77,142 @@ def _presence_context() -> dict:
         "project_code": st.session_state.get("ptm_presence_project"),
         "editing_scope": st.session_state.get("ptm_presence_scope"),
     }
+
+
+def _planner_legend() -> None:
+    items = [
+        ("Editable allocation", GRID_COLOURS["editable"]),
+        ("Capacity available", GRID_COLOURS["available"]),
+        ("No headroom", GRID_COLOURS["no_headroom"]),
+        ("Unavailable", GRID_COLOURS["unavailable"]),
+        ("Overallocated", GRID_COLOURS["over"]),
+        ("Time off / reduced availability", GRID_COLOURS["time_off"]),
+    ]
+    html = " ".join(
+        f'<span style="display:inline-block;padding:4px 9px;margin:2px 5px 4px 0;'
+        f'border:1px solid #d1d5db;border-radius:5px;background:{colour};'
+        f'font-size:.78rem;color:#1f2937">{label}</span>'
+        for label, colour in items
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _readonly_grid(
+    frame: pd.DataFrame,
+    *,
+    week_columns: list[str],
+    key: str,
+    fixed_department: str | None = None,
+    department_field: str | None = None,
+    gap_field: str | None = None,
+    summary_field: str | None = None,
+) -> None:
+    if frame.empty:
+        return
+
+    gb = GridOptionsBuilder.from_dataframe(frame)
+    gb.configure_default_column(
+        editable=False,
+        sortable=True,
+        filter=False,
+        resizable=True,
+        suppressMenu=True,
+    )
+
+    for column in frame.columns:
+        if column in week_columns:
+            if summary_field:
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      const label = String(params.data['{summary_field}'] || '');
+                      const value = Number(params.value || 0);
+                      if (label.includes('FREE') || label.includes('Net Capacity')) {{
+                        if (value < -0.01) return {{backgroundColor: '{GRID_COLOURS["over"]}', color: '#7f1d1d'}};
+                        if (value > 0.01) return {{backgroundColor: '{GRID_COLOURS["available"]}'}};
+                        return {{backgroundColor: '{GRID_COLOURS["no_headroom"]}'}};
+                      }}
+                      if (label.includes('CAPACITY') || label.includes('Available')) {{
+                        return {{backgroundColor: '{GRID_COLOURS["available"]}'}};
+                      }}
+                      if (label.includes('PLANNED') || label.includes('Planned')) {{
+                        return {{backgroundColor: '{GRID_COLOURS["editable"]}'}};
+                      }}
+                      return null;
+                    }}
+                    """
+                )
+            elif department_field:
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      const value = Number(params.value || 0);
+                      if (value <= 0) return null;
+                      const dept = String(params.data['{department_field}'] || '');
+                      const colours = {{RS:'{DEPT_TINTS["RS"]}', GIS:'{DEPT_TINTS["GIS"]}', PLS:'{DEPT_TINTS["PLS"]}'}};
+                      return {{backgroundColor: colours[dept] || '#f3f4f6'}};
+                    }}
+                    """
+                )
+            else:
+                tint = DEPT_TINTS.get(fixed_department or "", "#f3f4f6")
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      return Number(params.value || 0) > 0
+                        ? {{backgroundColor: '{tint}'}}
+                        : null;
+                    }}
+                    """
+                )
+            gb.configure_column(
+                column,
+                header_name=date.fromisoformat(column).strftime("%d %b"),
+                width=82,
+                type=["numericColumn"],
+                valueFormatter="x == null ? '' : Number(x).toFixed(1)",
+                cellStyle=cell_style,
+            )
+
+    if "Project / Activity" in frame.columns:
+        gb.configure_column("Project / Activity", pinned="left", minWidth=180)
+    if "Person" in frame.columns:
+        gb.configure_column("Person", pinned="left", minWidth=180)
+    if "Project Code" in frame.columns:
+        gb.configure_column("Project Code", pinned="left", width=115)
+    if "Group" in frame.columns:
+        gb.configure_column("Group", pinned="left", width=80)
+    if gap_field and gap_field in frame.columns:
+        gb.configure_column(
+            gap_field,
+            cellStyle=JsCode(
+                f"""
+                function(params) {{
+                  if (params.value == null || params.value === '') return null;
+                  const value = Number(params.value);
+                  if (value < -0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+                  if (value > 0.01) return {{backgroundColor:'#fce8b2', color:'#7c2d12'}};
+                  return {{backgroundColor:'{GRID_COLOURS["available"]}', fontWeight:'600'}};
+                }}
+                """
+            ),
+        )
+
+    options = gb.build()
+    options["domLayout"] = "autoHeight"
+    options["rowHeight"] = 32
+    options["headerHeight"] = 36
+    options["suppressRowHoverHighlight"] = False
+
+    AgGrid(
+        frame,
+        gridOptions=options,
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=False,
+        theme="streamlit",
+        update_mode=GridUpdateMode.NO_UPDATE,
+        key=key,
+    )
 
 
 @st.fragment(run_every="15s")
