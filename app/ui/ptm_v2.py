@@ -170,7 +170,7 @@ def _readonly_grid(
                 header_name=date.fromisoformat(column).strftime("%d %b"),
                 width=82,
                 type=["numericColumn"],
-                valueFormatter="x == null ? '' : Number(x).toFixed(1)",
+                valueFormatter="value == null ? '' : Number(value).toFixed(1)",
                 cellStyle=cell_style,
             )
 
@@ -912,26 +912,28 @@ def _teams_breakdown() -> None:
             config[column] = st.column_config.NumberColumn(
                 date.fromisoformat(column).strftime("%d %b"), format="%.1f"
             )
-        st.dataframe(
+        _readonly_grid(
             frame,
-            hide_index=True,
-            use_container_width=True,
-            column_config=config,
+            week_columns=week_columns,
+            key=(
+                f"ptm_teams_breakdown::{view_mode}::{department}::{scope}::"
+                f"{start_week}::{horizon}::{','.join(selected_projects)}"
+            ),
+            department_field="Dept",
+            gap_field="Gap vs Remaining",
         )
 
     st.markdown("#### Department capacity")
     if not summary.empty:
-        summary_config = {}
-        for column in summary.columns:
-            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-":
-                summary_config[column] = st.column_config.NumberColumn(
-                    date.fromisoformat(column).strftime("%d %b"), format="%.1f"
-                )
-        st.dataframe(
+        summary_week_columns = [
+            column for column in summary.columns
+            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-"
+        ]
+        _readonly_grid(
             summary,
-            hide_index=True,
-            use_container_width=True,
-            column_config=summary_config,
+            week_columns=summary_week_columns,
+            key=f"ptm_teams_capacity::{department}::{start_week}::{horizon}",
+            summary_field="Summary",
         )
 
 
