@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import os
 import pandas as pd
 import altair as alt
 import streamlit as st
@@ -275,8 +276,15 @@ def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: 
     st.dataframe(style_planning_table(gantt), hide_index=True, use_container_width=True)
 
 
-planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
-planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
+show_legacy_ui = os.getenv("PLANNER_SHOW_LEGACY_UI", "").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+if show_legacy_ui:
+    planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
+    planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
+else:
+    planning_start = monday(date.today())
+    planning_end = planning_start + timedelta(weeks=12)
 weeks = week_starts(planning_start, planning_end) if planning_end >= planning_start else []
 
 
