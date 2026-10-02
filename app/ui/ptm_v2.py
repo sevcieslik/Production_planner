@@ -31,6 +31,7 @@ from app.services.ptm_planner_grid import (
     build_processor_project_matrix,
     build_team_project_matrix,
     changed_grid_cells,
+    changed_processor_matrix_cells,
     project_workload_card,
     save_grid_changes,
 )
@@ -106,6 +107,7 @@ def _readonly_grid(
     department_field: str | None = None,
     gap_field: str | None = None,
     summary_field: str | None = None,
+    summary_prefix_width: int | None = None,
 ) -> None:
     if frame.empty:
         return
@@ -197,6 +199,18 @@ def _readonly_grid(
         gb.configure_column("Actual h", width=80, minWidth=74, maxWidth=92)
     if "Type" in frame.columns:
         gb.configure_column("Type", width=76, minWidth=70, maxWidth=88)
+    if "Planned h" in frame.columns:
+        gb.configure_column("Planned h", width=82, minWidth=76, maxWidth=92)
+    if "Total h" in frame.columns:
+        gb.configure_column("Total h", width=84, minWidth=78, maxWidth=92)
+    if "Summary" in frame.columns and summary_prefix_width:
+        gb.configure_column(
+            "Summary",
+            pinned="left",
+            width=summary_prefix_width,
+            minWidth=summary_prefix_width,
+            maxWidth=summary_prefix_width,
+        )
     if "Group" in frame.columns:
         gb.configure_column("Group", hide=True)
     if gap_field and gap_field in frame.columns:
@@ -242,6 +256,7 @@ def _readonly_grid(
     )
     options["suppressRowHoverHighlight"] = False
 
+    grid_height = 42 + (32 * len(frame))
     AgGrid(
         frame,
         gridOptions=options,
@@ -249,6 +264,8 @@ def _readonly_grid(
         fit_columns_on_grid_load=False,
         theme="streamlit",
         update_mode=GridUpdateMode.NO_UPDATE,
+        height=grid_height,
+        width="100%",
         key=key,
     )
 
@@ -310,6 +327,31 @@ def _parse_optional_number(value: str, label: str) -> float | None:
 
 def _queue_frame(department: str) -> pd.DataFrame:
     queue = build_work_queue()
+    if department == "All":
+        records = []
+        for dept in DEPARTMENTS:
+            for row in queue[dept]:
+                records.append({"Department": dept, **row})
+        frame = pd.DataFrame(records)
+        if frame.empty:
+            return frame
+        shown = [
+            "Department",
+            "Project Code",
+            "Project",
+            "Priority",
+            "PM Deadline",
+            "Upstream Ready",
+            "Bid h",
+            "Estimate h",
+            "Actual h",
+            "Remaining h",
+            "Planned h",
+            "Forecast",
+            "Action",
+        ]
+        return frame[shown]
+
     frame = pd.DataFrame(queue[department])
     if frame.empty:
         return frame
@@ -340,8 +382,10 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
     projects = list_projects(active_only=True)
     c1, c2, c3 = st.columns([2, 2, 5])
     c1.metric("Active projects", len(projects))
-    department = c2.segmented_control("Department", DEPARTMENTS, default="RS", key="ptm_queue_department")
-    st.session_state["ptm_presence_department"] = department
+    department = c2.segmented_control(
+        "Department", ("All", *DEPARTMENTS), default="All", key="ptm_queue_department"
+    )
+    st.session_state["ptm_presence_department"] = None if department == "All" else department
     st.session_state["ptm_presence_view"] = "Projects / Work Queue"
 
     if is_admin:
@@ -448,6 +492,10 @@ def _work_queue(user: str, *, is_admin: bool) -> None:
             "Forecast": st.column_config.DateColumn(format="DD MMM YYYY"),
         },
     )
+
+    if department == "All":
+        st.caption("Select RS, GIS or PLS to edit department-specific manager inputs.")
+        return
 
     st.markdown("#### Manager inputs")
     choices = {
