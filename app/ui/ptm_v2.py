@@ -655,6 +655,7 @@ def _planning_grid(user: str) -> None:
                 week_columns=week_columns,
                 key=f"ptm_team_project_summary::{department}::{start_week}::{horizon}",
                 summary_field="Summary",
+                summary_prefix_width=536,
             )
         return
 
@@ -675,13 +676,32 @@ def _planning_grid(user: str) -> None:
             people,
             key=f"ptm_processor_drilldown::{department}",
         )
-        frame, summary, weeks, _ = build_processor_project_matrix(
-            department,
-            person,
-            start_week=start_week,
-            horizon_weeks=horizon,
+
+        snapshot_key = (
+            f"ptm_processor_snapshot::{department}::{person}::"
+            f"{start_week.isoformat()}::{horizon}"
         )
+        if snapshot_key not in st.session_state:
+            frame, summary, weeks, _, versions = build_processor_project_matrix(
+                department,
+                person,
+                start_week=start_week,
+                horizon_weeks=horizon,
+            )
+            st.session_state[snapshot_key] = {
+                "frame": frame.to_dict("records"),
+                "summary": summary.to_dict("records"),
+                "weeks": [week.isoformat() for week in weeks],
+                "versions": versions,
+            }
+
+        snapshot = st.session_state[snapshot_key]
+        frame = pd.DataFrame(snapshot["frame"])
+        summary = pd.DataFrame(snapshot["summary"])
+        weeks = [date.fromisoformat(value) for value in snapshot["weeks"]]
+        versions = snapshot["versions"]
         week_columns = [week.isoformat() for week in weeks]
+
         available_row = summary[summary["Summary"] == "AVAILABLE"]
         planned_row = summary[summary["Summary"] == "PLANNED"]
         free_row = summary[summary["Summary"] == "FREE / OVER"]
@@ -706,18 +726,105 @@ def _planning_grid(user: str) -> None:
             if frame.empty:
                 st.info("No project or activity hours are allocated to this processor in the selected horizon.")
             else:
-                _readonly_grid(
-                    frame,
-                    week_columns=week_columns,
-                    key=f"ptm_processor_matrix::{department}::{person}::{start_week}::{horizon}",
-                    fixed_department=department,
+                gb = GridOptionsBuilder.from_dataframe(frame)
+                gb.configure_default_column(
+                    editable=False,
+                    sortable=False,
+                    filter=False,
+                    resizable=True,
+                    suppressMenu=True,
                 )
+                gb.configure_column("Project Code", pinned="left", width=96, minWidth=88, maxWidth=108)
+                gb.configure_column("Project / Activity", pinned="left", width=168, minWidth=145, maxWidth=220)
+                gb.configure_column("Type", width=76, minWidth=70, maxWidth=88)
+                gb.configure_column("Total h", width=84, minWidth=78, maxWidth=92)
+                for week in weeks:
+                    key = week.isoformat()
+                    gb.configure_column(
+                        key,
+                        header_name=week.strftime("%d %b"),
+                        width=78,
+                        minWidth=74,
+                        maxWidth=96,
+                        editable=JsCode("function(params) { return params.data.Type === 'PROJECT'; }"),
+                        type=["numericColumn"],
+                        valueFormatter="Number(value || 0).toFixed(1)",
+                        cellStyle=JsCode(
+                            f"""
+                            function(params) {{
+                              const value = Number(params.value || 0);
+                              if (params.data.Type !== 'PROJECT') {{
+                                return value > 0
+                                  ? {{backgroundColor:'#eeeeee', color:'#555555'}}
+                                  : {{backgroundColor:'#f7f7f7', color:'#777777'}};
+                              }}
+                              return value > 0
+                                ? {{backgroundColor:'{GRID_COLOURS["editable"]}'}}
+                                : {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+                            }}
+                            """
+                        ),
+                    )
+                options = gb.build()
+                options["domLayout"] = "autoHeight"
+                options["rowHeight"] = 32
+                options["headerHeight"] = 36
+                response = AgGrid(
+                    frame,
+                    gridOptions=options,
+                    allow_unsafe_jscode=True,
+                    fit_columns_on_grid_load=False,
+                    theme="streamlit",
+                    update_mode=GridUpdateMode.VALUE_CHANGED,
+                    height=42 + (32 * len(frame)),
+                    width="100%",
+                    key=f"ptm_processor_matrix::{snapshot_key}",
+                )
+                edited = pd.DataFrame(response["data"])
+                changes = changed_processor_matrix_cells(
+                    frame,
+                    edited,
+                    department=department,
+                    person_name=person,
+                    weeks=weeks,
+                    versions=versions,
+                )
+                b1, b2, b3 = st.columns([2, 2, 6])
+                save_clicked = b1.button(
+                    f"Save changes ({len(changes)})",
+                    type="primary",
+                    disabled=not changes,
+                    key=f"ptm_processor_save::{snapshot_key}",
+                )
+                if b2.button("Reload latest", key=f"ptm_processor_reload::{snapshot_key}"):
+                    st.session_state.pop(snapshot_key, None)
+                    st.rerun()
+                b3.caption("Only project rows are editable here. Activities remain read-only.")
+
+                if save_clicked:
+                    try:
+                        save_grid_changes(changes, user=user)
+                    except AllocationConflict as exc:
+                        current = exc.current or {}
+                        st.error(
+                            "Conflict: another user changed one of these processor allocations first. "
+                            f"Current value: {current.get('hours', '?')} h, "
+                            f"version {current.get('version', '?')}. Reload latest before retrying."
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.session_state.pop(snapshot_key, None)
+                        st.success(f"Saved {len(changes)} changed processor allocation cell(s).")
+                        st.rerun()
+
             st.markdown("##### Weekly availability")
             _readonly_grid(
                 summary,
                 week_columns=week_columns,
                 key=f"ptm_processor_summary::{department}::{person}::{start_week}::{horizon}",
                 summary_field="Summary",
+                summary_prefix_width=424,
             )
         return
 
@@ -797,8 +904,8 @@ def _planning_grid(user: str) -> None:
         resizable=True,
         suppressMenu=True,
     )
-    gb.configure_column("Person", pinned="left", minWidth=180)
-    gb.configure_column("Role", pinned="left", minWidth=180)
+    gb.configure_column("Person", pinned="left", width=180, minWidth=180, maxWidth=180)
+    gb.configure_column("Role", pinned="left", width=180, minWidth=180, maxWidth=180)
     gb.configure_column(
         "H Available",
         pinned="left",
@@ -823,8 +930,6 @@ def _planning_grid(user: str) -> None:
             """
         ),
     )
-    gb.configure_column("Time Off", pinned="left", width=85)
-
     for week in weeks:
         week_key = week.isoformat()
         avail_key = f"__available__{week_key}"
@@ -880,6 +985,8 @@ def _planning_grid(user: str) -> None:
         fit_columns_on_grid_load=False,
         theme="streamlit",
         update_mode=GridUpdateMode.VALUE_CHANGED,
+        height=42 + (32 * len(original)),
+        width="100%",
         key=f"ptm_grid_editor::{snapshot_key}",
     )
     edited = pd.DataFrame(response["data"])
@@ -937,6 +1044,7 @@ def _planning_grid(user: str) -> None:
             week_columns=[week.isoformat() for week in weeks],
             key=f"ptm_grid_summary::{snapshot_key}",
             summary_field="Summary",
+            summary_prefix_width=555,
         )
 
 def _teams_breakdown() -> None:
