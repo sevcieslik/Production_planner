@@ -100,7 +100,6 @@ def build_department_grid(
                 sum(available[(person, week)] - all_planned[(person, week)] for week in weeks),
                 1,
             ),
-            "Time Off": any(time_off.get((person, week), False) for week in weeks),
         }
         for week in weeks:
             selected_hours = round(selected[(person, week)], 1)
@@ -291,13 +290,13 @@ def build_processor_project_matrix(
     start_week: date,
     horizon_weeks: int,
     engine=None,
-) -> tuple[pd.DataFrame, pd.DataFrame, list[date], list[str]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, list[date], list[str], dict[tuple[str, str], int]]:
     """Show one processor's projects/activities and weekly availability."""
     engine = engine or get_engine()
     department = str(department).upper()
     weeks = week_starts(start_week, horizon_weeks)
     if not weeks:
-        return pd.DataFrame(), pd.DataFrame(), [], []
+        return pd.DataFrame(), pd.DataFrame(), [], [], {}
 
     capacity_rows = weekly_person_capacity(
         start_week,
@@ -327,6 +326,10 @@ def build_processor_project_matrix(
         )
         if row["person_name"] == person_name
     ]
+    versions = {
+        (row["project_code"], row["week_start"].isoformat()): int(row.get("version") or 0)
+        for row in allocations
+    }
     non_project = [
         row
         for row in list_non_project_allocations(
@@ -395,7 +398,52 @@ def build_processor_project_matrix(
         free[week.isoformat()] = round(available[week] - planned[week], 1)
     summary_rows.append(free)
 
-    return pd.DataFrame(rows), pd.DataFrame(summary_rows), weeks, people
+    return pd.DataFrame(rows), pd.DataFrame(summary_rows), weeks, people, versions
+
+
+def changed_processor_matrix_cells(
+    original: pd.DataFrame,
+    edited: pd.DataFrame,
+    *,
+    department: str,
+    person_name: str,
+    weeks: list[date],
+    versions: dict[tuple[str, str], int],
+) -> list[dict[str, Any]]:
+    """Diff editable project rows in a processor drill-down matrix."""
+    if original.empty and edited.empty:
+        return []
+
+    original_by_code = {
+        str(row.get("Project Code") or ""): row
+        for row in original.to_dict("records")
+        if str(row.get("Project Code") or "").strip()
+    }
+    changes: list[dict[str, Any]] = []
+    for row in edited.to_dict("records"):
+        if str(row.get("Type") or "").upper() != "PROJECT":
+            continue
+        project_code = str(row.get("Project Code") or "").strip()
+        if not project_code:
+            continue
+        old_row = original_by_code.get(project_code, {})
+        for week in weeks:
+            key = week.isoformat()
+            old = round(float(old_row.get(key) or 0), 2)
+            new = round(max(float(row.get(key) or 0), 0), 2)
+            if abs(old - new) <= 0.005:
+                continue
+            changes.append(
+                {
+                    "project_code": project_code,
+                    "department": department,
+                    "person_name": person_name,
+                    "week_start": week,
+                    "hours": new,
+                    "expected_version": versions.get((project_code, key), 0),
+                }
+            )
+    return changes
 
 
 def changed_grid_cells(
