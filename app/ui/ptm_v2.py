@@ -1136,11 +1136,13 @@ def _teams_breakdown() -> None:
             column for column in summary.columns
             if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-"
         ]
+        teams_prefix_width = 616 if scope == "Projects Only" else 692
         _readonly_grid(
             summary,
             week_columns=summary_week_columns,
             key=f"ptm_teams_capacity::{department}::{start_week}::{horizon}",
             summary_field="Summary",
+            summary_prefix_width=teams_prefix_width,
         )
 
 
