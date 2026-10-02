@@ -9,6 +9,8 @@ from app.data.planner_store import init_planner_store, upsert_high_level_project
 from app.services.ptm_planner_grid import (
     allocation_grid_summary,
     build_department_grid,
+    build_processor_project_matrix,
+    build_team_project_matrix,
     changed_grid_cells,
     save_grid_changes,
 )
@@ -119,3 +121,65 @@ def test_grid_summary_uses_same_capacity_and_allocation_records():
     assert rows["TOTAL PLANNED"][weeks[0].isoformat()] == 32
     assert rows["TEAM CAPACITY"][weeks[0].isoformat()] == 40
     assert rows["FREE / OVER"][weeks[0].isoformat()] == 8
+
+
+def test_grid_exposes_week_helper_state_for_cell_formatting():
+    engine = _engine()
+    _seed(engine)
+    frame, _, weeks = build_department_grid(
+        "GIS", "NM1", start_week=date(2026, 10, 5), horizon_weeks=1, engine=engine
+    )
+    week = weeks[0].isoformat()
+    row = frame.iloc[0]
+    assert row[f"__available__{week}"] == 40
+    assert row[f"__other__{week}"] == 0
+    assert bool(row[f"__timeoff__{week}"]) is False
+
+
+def test_team_by_project_and_processor_drilldown_share_allocation_records():
+    engine = _engine()
+    _seed(engine)
+    original, versions, weeks = build_department_grid(
+        "GIS", "NM1", start_week=date(2026, 10, 5), horizon_weeks=2, engine=engine
+    )
+    edited = original.copy()
+    edited.loc[0, weeks[0].isoformat()] = 24
+    edited.loc[0, weeks[1].isoformat()] = 16
+    save_grid_changes(
+        changed_grid_cells(
+            original,
+            edited,
+            project_code="NM1",
+            department="GIS",
+            weeks=weeks,
+            versions=versions,
+        ),
+        user="Dom",
+        engine=engine,
+    )
+
+    team, team_summary, team_weeks = build_team_project_matrix(
+        "GIS", start_week=date(2026, 10, 5), horizon_weeks=2, engine=engine
+    )
+    project = next(row for row in team.to_dict("records") if row["Project Code"] == "NM1")
+    assert project["Planned h"] == 40
+    assert project[team_weeks[0].isoformat()] == 24
+    assert project[team_weeks[1].isoformat()] == 16
+
+    summary_rows = {row["Summary"]: row for row in team_summary.to_dict("records")}
+    assert summary_rows["TOTAL PLANNED"][team_weeks[0].isoformat()] == 24
+    assert summary_rows["TEAM CAPACITY"][team_weeks[0].isoformat()] == 40
+
+    detail, detail_summary, detail_weeks, people = build_processor_project_matrix(
+        "GIS",
+        "User, Test",
+        start_week=date(2026, 10, 5),
+        horizon_weeks=2,
+        engine=engine,
+    )
+    assert "User, Test" in people
+    detail_project = next(row for row in detail.to_dict("records") if row["Project Code"] == "NM1")
+    assert detail_project["Total h"] == 40
+    detail_rows = {row["Summary"]: row for row in detail_summary.to_dict("records")}
+    assert detail_rows["PLANNED"][detail_weeks[0].isoformat()] == 24
+    assert detail_rows["FREE / OVER"][detail_weeks[0].isoformat()] == 16
