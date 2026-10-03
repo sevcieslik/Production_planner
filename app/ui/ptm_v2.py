@@ -1,0 +1,1799 @@
+from __future__ import annotations
+
+from datetime import date, timedelta
+from uuid import uuid4
+
+import pandas as pd
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+
+from app.data.planner_store import (
+    AllocationConflict,
+    StageInputConflict,
+    get_stage_input,
+    get_sync_status,
+    heartbeat_session,
+    init_planner_store,
+    list_active_sessions,
+    list_projects,
+    purge_stale_sessions,
+    save_stage_input,
+)
+from app.integrations.delivery_operations import (
+    read_flow_dashboard,
+    read_rates_tracker_front_page,
+    read_rates_tracker_project,
+)
+from app.integrations.google_sheets import GoogleSheetsConfigurationError
+from app.services.dot_sync import DOT_SYNC_SOURCE, sync_dot_actuals
+from app.services.high_level_export import export_to_high_level
+from app.services.high_level_sync import sync_high_level_projects
+from app.services.ptm_capacity import weekly_person_capacity
+from app.services.ptm_migration import migrate_ptm_snapshot
+from app.services.ptm_planner_grid import (
+    allocation_grid_summary,
+    build_department_grid,
+    build_processor_project_matrix,
+    build_team_project_matrix,
+    changed_grid_cells,
+    changed_processor_matrix_cells,
+    project_workload_card,
+    save_grid_changes,
+)
+from app.services.ptm_resources import (
+    ResourceConflict,
+    list_assignments,
+    list_people,
+    list_time_off,
+    save_assignment,
+    save_person,
+    save_time_off,
+)
+from app.services.ptm_teams_breakdown import build_teams_breakdown
+from app.services.ptm_work_queue import build_work_queue
+
+DEPARTMENTS = ("RS", "GIS", "PLS")
+
+DEPT_TINTS = {
+    "RS": "#d9eaf7",
+    "GIS": "#d9ead3",
+    "PLS": "#fce5cd",
+}
+GRID_COLOURS = {
+    "editable": "#fff2cc",
+    "available": "#d9ead3",
+    "no_headroom": "#cfe2f3",
+    "unavailable": "#d9d9d9",
+    "over": "#f4cccc",
+    "time_off": "#d9d2e9",
+}
+
+
+def _presence_session_id() -> str:
+    key = "ptm_presence_session_id"
+    if key not in st.session_state:
+        st.session_state[key] = uuid4().hex
+    return st.session_state[key]
+
+
+def _presence_context() -> dict:
+    return {
+        "current_view": st.session_state.get("ptm_presence_view") or "PTM Planner",
+        "department": st.session_state.get("ptm_presence_department"),
+        "project_code": st.session_state.get("ptm_presence_project"),
+        "editing_scope": st.session_state.get("ptm_presence_scope"),
+    }
+
+
+def _planner_legend() -> None:
+    items = [
+        ("Editable allocation", GRID_COLOURS["editable"]),
+        ("Capacity available", GRID_COLOURS["available"]),
+        ("No headroom", GRID_COLOURS["no_headroom"]),
+        ("Unavailable", GRID_COLOURS["unavailable"]),
+        ("Overallocated", GRID_COLOURS["over"]),
+        ("Time off / reduced availability", GRID_COLOURS["time_off"]),
+    ]
+    html = " ".join(
+        f'<span style="display:inline-block;padding:4px 9px;margin:2px 5px 4px 0;'
+        f'border:1px solid #d1d5db;border-radius:5px;background:{colour};'
+        f'font-size:.78rem;color:#1f2937">{label}</span>'
+        for label, colour in items
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _readonly_grid(
+    frame: pd.DataFrame,
+    *,
+    week_columns: list[str],
+    key: str,
+    fixed_department: str | None = None,
+    department_field: str | None = None,
+    gap_field: str | None = None,
+    summary_field: str | None = None,
+    summary_prefix_width: int | None = None,
+) -> None:
+    if frame.empty:
+        return
+
+    gb = GridOptionsBuilder.from_dataframe(frame)
+    gb.configure_default_column(
+        editable=False,
+        sortable=True,
+        filter=False,
+        resizable=True,
+        suppressMenu=True,
+        minWidth=58,
+    )
+
+    for column in frame.columns:
+        if column in week_columns:
+            if summary_field:
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      const label = String(params.data['{summary_field}'] || '');
+                      const value = Number(params.value || 0);
+                      if (label.includes('FREE') || label.includes('Net Capacity')) {{
+                        if (value < -0.01) return {{backgroundColor: '{GRID_COLOURS["over"]}', color: '#7f1d1d'}};
+                        if (value > 0.01) return {{backgroundColor: '{GRID_COLOURS["available"]}'}};
+                        return {{backgroundColor: '{GRID_COLOURS["no_headroom"]}'}};
+                      }}
+                      if (label.includes('CAPACITY') || label.includes('Available')) {{
+                        return {{backgroundColor: '{GRID_COLOURS["available"]}'}};
+                      }}
+                      if (label.includes('PLANNED') || label.includes('Planned')) {{
+                        return {{backgroundColor: '{GRID_COLOURS["editable"]}'}};
+                      }}
+                      return null;
+                    }}
+                    """
+                )
+            elif department_field:
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      const value = Number(params.value || 0);
+                      if (value <= 0) return null;
+                      const dept = String(params.data['{department_field}'] || '');
+                      const colours = {{RS:'{DEPT_TINTS["RS"]}', GIS:'{DEPT_TINTS["GIS"]}', PLS:'{DEPT_TINTS["PLS"]}'}};
+                      return {{backgroundColor: colours[dept] || '#f3f4f6'}};
+                    }}
+                    """
+                )
+            else:
+                tint = DEPT_TINTS.get(fixed_department or "", "#f3f4f6")
+                cell_style = JsCode(
+                    f"""
+                    function(params) {{
+                      return Number(params.value || 0) > 0
+                        ? {{backgroundColor: '{tint}'}}
+                        : null;
+                    }}
+                    """
+                )
+            gb.configure_column(
+                column,
+                header_name=date.fromisoformat(column).strftime("%d %b"),
+                width=78,
+                minWidth=74,
+                maxWidth=96,
+                type=["numericColumn"],
+                valueFormatter="value == null ? '' : Number(value).toFixed(1)",
+                cellStyle=cell_style,
+            )
+
+    if "Project / Activity" in frame.columns:
+        gb.configure_column(
+            "Project / Activity", pinned="left", width=168, minWidth=145, maxWidth=220
+        )
+    if "Person" in frame.columns:
+        gb.configure_column("Person", pinned="left", width=170, minWidth=150)
+    if "Project Code" in frame.columns:
+        gb.configure_column("Project Code", pinned="left", width=96, minWidth=88, maxWidth=108)
+    if "Dept" in frame.columns:
+        gb.configure_column("Dept", width=58, minWidth=54, maxWidth=66)
+    if "Remaining h" in frame.columns:
+        gb.configure_column("Remaining h", width=88, minWidth=82, maxWidth=98)
+    if "Assigned h" in frame.columns:
+        gb.configure_column("Assigned h", width=82, minWidth=76, maxWidth=92)
+    if "Gap vs Remaining" in frame.columns:
+        gb.configure_column("Gap vs Remaining", width=102, minWidth=94, maxWidth=112)
+    if "Actual h" in frame.columns:
+        gb.configure_column("Actual h", width=80, minWidth=74, maxWidth=92)
+    if "Type" in frame.columns:
+        gb.configure_column("Type", width=76, minWidth=70, maxWidth=88)
+    if "Planned h" in frame.columns:
+        gb.configure_column("Planned h", width=82, minWidth=76, maxWidth=92)
+    if "Total h" in frame.columns:
+        gb.configure_column("Total h", width=84, minWidth=78, maxWidth=92)
+    if "Summary" in frame.columns and summary_prefix_width:
+        gb.configure_column(
+            "Summary",
+            pinned="left",
+            width=summary_prefix_width,
+            minWidth=summary_prefix_width,
+            maxWidth=summary_prefix_width,
+        )
+    if "Group" in frame.columns:
+        gb.configure_column("Group", hide=True)
+    if gap_field and gap_field in frame.columns:
+        gb.configure_column(
+            gap_field,
+            cellStyle=JsCode(
+                f"""
+                function(params) {{
+                  if (params.value == null || params.value === '') return null;
+                  const value = Number(params.value);
+                  if (value < -0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+                  if (value > 0.01) return {{backgroundColor:'#fce8b2', color:'#7c2d12'}};
+                  return {{backgroundColor:'{GRID_COLOURS["available"]}', fontWeight:'600'}};
+                }}
+                """
+            ),
+        )
+
+    options = gb.build()
+    options["domLayout"] = "autoHeight"
+    options["rowHeight"] = 32
+    options["headerHeight"] = 36
+    minimum_width = 610 + (78 * len(week_columns))
+    options["onGridSizeChanged"] = JsCode(
+        f"""
+        function(params) {{
+          if (params.clientWidth >= {minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
+    options["onFirstDataRendered"] = JsCode(
+        f"""
+        function(params) {{
+          const host = params.api.getGui ? params.api.getGui() : null;
+          const clientWidth = host ? host.clientWidth : 0;
+          if (clientWidth >= {minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
+    options["suppressRowHoverHighlight"] = False
+
+    grid_height = 42 + (32 * len(frame))
+    AgGrid(
+        frame,
+        gridOptions=options,
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=False,
+        theme="streamlit",
+        update_mode=GridUpdateMode.NO_UPDATE,
+        height=grid_height,
+        width="100%",
+        key=key,
+    )
+
+
+@st.fragment(run_every="15s")
+def render_presence_bar() -> None:
+    session_id = _presence_session_id()
+    context = _presence_context()
+    heartbeat_session(
+        session_id,
+        user_email=st.session_state.user_email,
+        display_name=st.session_state.display_name,
+        role=st.session_state.role,
+        **context,
+    )
+    purge_stale_sessions(older_than_seconds=300)
+    active = list_active_sessions(max_age_seconds=45, exclude_session_id=session_id)
+    if not active:
+        st.caption("Active now: only you")
+        return
+
+    labels = []
+    for row in active:
+        location = row.get("department") or row.get("current_view") or "Planner"
+        if row.get("project_code"):
+            location += f" / {row['project_code']}"
+        labels.append(f"● {row['display_name']} — {location}")
+    st.caption("Active now: " + "   ".join(labels))
+
+    current_department = context.get("department")
+    current_project = context.get("project_code")
+    if current_department and current_project:
+        same_scope = [
+            row for row in active
+            if row.get("department") == current_department
+            and row.get("project_code") == current_project
+            and row.get("editing_scope") in {"weekly allocations", "manager inputs"}
+        ]
+        if same_scope:
+            names = ", ".join(row["display_name"] for row in same_scope)
+            st.warning(
+                f"Also editing {current_department} / {current_project}: {names}. "
+                "You can continue working; stale writes are blocked by version checks."
+            )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_flow_dashboard() -> dict:
+    return read_flow_dashboard()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_rates_front_page() -> list[dict]:
+    return read_rates_tracker_front_page()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_rates_project(project_code: str) -> dict:
+    return read_rates_tracker_project(project_code)
+
+
+def _flow_view() -> None:
+    st.subheader("Flow")
+    st.caption(
+        "Read-only operational flow view from the Delivery Operations spreadsheet. "
+        "Source data remains owned by the Google Sheet."
+    )
+    refresh_col, status_col = st.columns([1, 5])
+    if refresh_col.button("Refresh source", key="ptm_flow_refresh"):
+        _cached_flow_dashboard.clear()
+        st.rerun()
+
+    st.session_state["ptm_presence_view"] = "Flow"
+    st.session_state["ptm_presence_department"] = None
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    try:
+        payload = _cached_flow_dashboard()
+    except GoogleSheetsConfigurationError as exc:
+        st.warning(str(exc))
+        st.caption(
+            "Configure DELIVERY_OPERATIONS_SPREADSHEET_ID in Render and share the "
+            "Delivery Operations spreadsheet with the Planner service account as Viewer."
+        )
+        return
+    except Exception as exc:
+        st.error(f"Flow source could not be loaded: {exc}")
+        return
+
+    snapshot = payload.get("snapshot") or "Unknown"
+    status_col.caption(f"Latest source snapshot: {snapshot}")
+
+    current = pd.DataFrame(payload.get("current_state") or [])
+    st.markdown("#### Current Production State")
+    if current.empty:
+        st.info("No current production-state rows were returned.")
+    else:
+        config = {}
+        for column in current.columns:
+            if column != "Project":
+                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        st.dataframe(
+            current,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+    movement = pd.DataFrame(payload.get("movement") or [])
+    st.markdown("#### Movement Since Tuesday 15:00")
+    if payload.get("movement_period"):
+        st.caption(payload["movement_period"])
+    if movement.empty:
+        st.info("No movement rows were returned.")
+    else:
+        config = {}
+        for column in movement.columns:
+            if column != "Project":
+                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        st.dataframe(
+            movement,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+    backlog = pd.DataFrame(payload.get("backlog") or [])
+    st.markdown("#### Production Backlog")
+    if backlog.empty:
+        st.info("No backlog rows were returned.")
+    else:
+        config = {
+            "Queue km": st.column_config.NumberColumn(format="%.1f km"),
+            "Historical Capacity km/week": st.column_config.NumberColumn(format="%.1f km/week"),
+            "Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+            "Provisional Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+            "Weeks Used": st.column_config.NumberColumn(format="%.0f"),
+            "Lookback Weeks": st.column_config.NumberColumn(format="%.0f"),
+            "Target Weeks": st.column_config.NumberColumn(format="%.0f"),
+        }
+        st.dataframe(
+            backlog,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+
+def _rates_tracker_view() -> None:
+    st.subheader("Rates Tracker")
+    st.caption(
+        "Read-only view from Production Rates Estimations Tracker. "
+        "Use the source spreadsheet for edits while we validate parity."
+    )
+    refresh_col, _ = st.columns([1, 5])
+    if refresh_col.button("Refresh source", key="ptm_rates_refresh"):
+        _cached_rates_front_page.clear()
+        _cached_rates_project.clear()
+        st.rerun()
+
+    st.session_state["ptm_presence_view"] = "Rates Tracker"
+    st.session_state["ptm_presence_department"] = None
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    try:
+        rows = _cached_rates_front_page()
+    except GoogleSheetsConfigurationError as exc:
+        st.warning(str(exc))
+        st.caption(
+            "Configure RATES_TRACKER_SPREADSHEET_ID in Render and share the "
+            "Production Rates Estimations Tracker spreadsheet with the Planner service account as Viewer."
+        )
+        return
+    except Exception as exc:
+        st.error(f"Rates Tracker source could not be loaded: {exc}")
+        return
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        st.info("No Rates Tracker project rows were returned.")
+        return
+
+    f1, f2 = st.columns([2, 1])
+    search = f1.text_input("Project search", key="ptm_rates_search").strip().lower()
+    ownership = f2.selectbox(
+        "With Richard?",
+        ["All", "Yes", "No"],
+        key="ptm_rates_with_richard",
+    )
+
+    filtered = frame.copy()
+    if search:
+        mask = (
+            filtered["Project"].astype(str).str.lower().str.contains(search, na=False)
+            | filtered["Name"].astype(str).str.lower().str.contains(search, na=False)
+        )
+        filtered = filtered[mask]
+    if ownership == "Yes":
+        filtered = filtered[filtered["With Richard?"] == True]
+    elif ownership == "No":
+        filtered = filtered[filtered["With Richard?"] == False]
+
+    total_hours = float(filtered["Total"].fillna(0).sum()) if "Total" in filtered else 0.0
+    rs_hours = float(filtered["RS Hours"].fillna(0).sum()) if "RS Hours" in filtered else 0.0
+    gis_hours = float(filtered["GIS Hours"].fillna(0).sum()) if "GIS Hours" in filtered else 0.0
+    pls_hours = float(filtered["PLS Hours"].fillna(0).sum()) if "PLS Hours" in filtered else 0.0
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Projects", len(filtered))
+    m2.metric("RS", f"{rs_hours:,.0f} h")
+    m3.metric("GIS", f"{gis_hours:,.0f} h")
+    m4.metric("PLS", f"{pls_hours:,.0f} h")
+    m5.metric("Total", f"{total_hours:,.0f} h")
+
+    st.dataframe(
+        filtered,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "RS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "GIS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "PLS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "Total": st.column_config.NumberColumn(format="%.1f h"),
+            "With Richard?": st.column_config.CheckboxColumn(),
+        },
+    )
+
+    st.markdown("#### Project rate assumptions")
+    options = {
+        f"{row['Project']} · {row['Name']}": row["Project"]
+        for row in filtered.to_dict("records")
+    }
+    if not options:
+        st.info("No project matches the current filters.")
+        return
+    selected = st.selectbox(
+        "Project",
+        list(options),
+        key="ptm_rates_project",
+    )
+    project_code = options[selected]
+    st.session_state["ptm_presence_project"] = project_code
+
+    try:
+        detail = _cached_rates_project(project_code)
+    except Exception as exc:
+        st.error(f"Project rate assumptions could not be loaded: {exc}")
+        return
+
+    if not detail.get("sheet_title"):
+        st.info("No project tab matching this project code was found in the Rates Tracker.")
+        return
+
+    caption_parts = [detail["sheet_title"]]
+    if detail.get("project_name"):
+        caption_parts.append(detail["project_name"])
+    st.caption(" · ".join(caption_parts))
+
+    assumptions = pd.DataFrame(detail.get("assumptions") or [])
+    if assumptions.empty:
+        st.info("No rate-assumption rows were found on this project tab.")
+    else:
+        config = {}
+        if "Rate km/day" in assumptions.columns:
+            config["Rate km/day"] = st.column_config.NumberColumn(format="%.1f")
+        if "Hrs" in assumptions.columns:
+            config["Hrs"] = st.column_config.NumberColumn(format="%.1f h")
+        st.dataframe(
+            assumptions,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+
+def _parse_optional_number(value: str, label: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        number = float(text.replace(",", ""))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a number or blank.") from exc
+    if number < 0:
+        raise ValueError(f"{label} cannot be negative.")
+    return number
+
+
+def _queue_frame(department: str) -> pd.DataFrame:
+    queue = build_work_queue()
+    if department == "All":
+        records = []
+        for dept in DEPARTMENTS:
+            for row in queue[dept]:
+                records.append({"Department": dept, **row})
+        frame = pd.DataFrame(records)
+        if frame.empty:
+            return frame
+        shown = [
+            "Department",
+            "Project Code",
+            "Project",
+            "Priority",
+            "PM Deadline",
+            "Upstream Ready",
+            "Bid h",
+            "Estimate h",
+            "Actual h",
+            "Remaining h",
+            "Planned h",
+            "Forecast",
+            "Action",
+        ]
+        return frame[shown]
+
+    frame = pd.DataFrame(queue[department])
+    if frame.empty:
+        return frame
+    shown = [
+        "Project Code",
+        "Project",
+        "Priority",
+        "PM Deadline",
+        "Upstream Ready",
+        "Bid h",
+        "Estimate h",
+        "Actual h",
+        "Remaining h",
+        "Planned h",
+        "Forecast",
+        "Action",
+    ]
+    return frame[shown]
+
+
+def _work_queue(user: str, *, is_admin: bool) -> None:
+    st.subheader("Projects / Work Queue")
+    st.caption(
+        "High Level owns project facts and bid hours. Planner owns PTM estimates, "
+        "remaining overrides, handovers and allocations."
+    )
+
+    projects = list_projects(active_only=True)
+    c1, c2, c3 = st.columns([2, 2, 5])
+    c1.metric("Active projects", len(projects))
+    department = c2.segmented_control(
+        "Department", ("All", *DEPARTMENTS), default="All", key="ptm_queue_department"
+    )
+    st.session_state["ptm_presence_department"] = None if department == "All" else department
+    st.session_state["ptm_presence_view"] = "Projects / Work Queue"
+
+    if is_admin:
+        sync_col, dot_col, migrate_col, export_col = c3.columns(4)
+        if sync_col.button("Sync High Level now", key="ptm_high_level_sync"):
+            try:
+                result = sync_high_level_projects()
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"High Level sync failed: {exc}")
+            else:
+                st.success(
+                    f"High Level synced: {result['inserted']} new, "
+                    f"{result['updated']} updated, {result['unchanged']} unchanged."
+                )
+                st.rerun()
+        if dot_col.button("Sync DoT actuals", key="ptm_dot_sync"):
+            try:
+                result = sync_dot_actuals()
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"DoT sync failed: {exc}")
+            else:
+                st.success(
+                    f"DoT synced: {result['aggregates']} project/department totals "
+                    f"from {result['source_rows_processed']} source rows."
+                )
+                st.rerun()
+        if migrate_col.button("Import current PTM snapshot", key="ptm_legacy_migration"):
+            try:
+                sync_high_level_projects()
+                result = migrate_ptm_snapshot(user=user)
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"PTM migration failed: {exc}")
+            else:
+                st.success(
+                    "PTM snapshot imported without overwriting existing Planner edits. "
+                    f"People: {result['people']['inserted']} new / {result['people']['updated']} updated; "
+                    f"project allocations: {result['project_allocations_inserted']} new."
+                )
+                if result["skipped_people"]:
+                    st.warning(
+                        "Skipped roster records without a valid RS/GIS/PLS home department: "
+                        + ", ".join(result["skipped_people"])
+                    )
+                st.rerun()
+        if export_col.button("Publish to High Level", key="ptm_high_level_export"):
+            try:
+                result = export_to_high_level()
+            except GoogleSheetsConfigurationError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"High Level export failed: {exc}")
+            else:
+                st.success(
+                    "High Level updated: "
+                    + ", ".join(f"{sheet} {rows} rows" for sheet, rows in result.items())
+                    + ". Projects tab was not modified."
+                )
+
+    dot_status = get_sync_status(DOT_SYNC_SOURCE)
+    if dot_status:
+        source_max = dot_status.get("source_max_timestamp")
+        source_text = (
+            source_max.strftime("%d %b %Y %H:%M")
+            if source_max is not None else "unknown source timestamp"
+        )
+        st.caption(
+            f"DoT actuals: last synced {dot_status['last_synced_at'].strftime('%d %b %Y %H:%M')} "
+            f"· latest source row {source_text} · {dot_status['rows_processed']:,} relevant rows"
+        )
+    else:
+        st.caption("DoT actuals have not yet been synced into the new Planner store.")
+
+    try:
+        frame = _queue_frame(department)
+    except Exception as exc:
+        st.error(f"Work Queue could not be built: {exc}")
+        return
+
+    if frame.empty:
+        st.info(
+            "No High Level projects have been synced into the new Planner store yet. "
+            "An admin can use 'Sync High Level now' once the Google service account is configured."
+        )
+        return
+
+    st.dataframe(
+        frame,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "PM Deadline": st.column_config.DateColumn(format="DD MMM YYYY"),
+            "Upstream Ready": st.column_config.TextColumn(),
+            "Bid h": st.column_config.NumberColumn(format="%.1f"),
+            "Estimate h": st.column_config.NumberColumn(format="%.1f"),
+            "Actual h": st.column_config.NumberColumn(format="%.1f"),
+            "Remaining h": st.column_config.NumberColumn(format="%.1f"),
+            "Planned h": st.column_config.NumberColumn(format="%.1f"),
+            "Forecast": st.column_config.DateColumn(format="DD MMM YYYY"),
+        },
+    )
+
+    if department == "All":
+        st.caption("Select RS, GIS or PLS to edit department-specific manager inputs.")
+        return
+
+    st.markdown("#### Manager inputs")
+    choices = {
+        f"{row['Project Code']} · {row['Project']}": row["Project Code"]
+        for row in build_work_queue()[department]
+    }
+    selected_label = st.selectbox("Project", list(choices), key="ptm_manager_input_project")
+    code = choices[selected_label]
+    st.session_state["ptm_presence_project"] = code
+    st.session_state["ptm_presence_scope"] = "manager inputs"
+    heartbeat_session(
+        _presence_session_id(),
+        user_email=st.session_state.user_email,
+        display_name=st.session_state.display_name,
+        role=st.session_state.role,
+        **_presence_context(),
+    )
+
+    current = get_stage_input(code, department)
+    version = int(current["version"]) if current else 0
+    updated_text = ""
+    if current:
+        updated_text = f"Version {version} · last saved by {current['updated_by']}"
+    st.caption(updated_text or "No manager inputs saved yet.")
+
+    with st.form(f"ptm_stage_input_{department}_{code}"):
+        a, b, c = st.columns(3)
+        estimate_text = a.text_input(
+            "PTM Estimate h",
+            "" if not current or current.get("estimate_hours") is None else str(current["estimate_hours"]),
+            help="Blank = use Bid hours as the planning baseline.",
+        )
+        override_text = b.text_input(
+            "Remaining Override h",
+            "" if not current or current.get("remaining_override_hours") is None else str(current["remaining_override_hours"]),
+            help="Blank = Remaining is calculated from Estimate/Bid minus Actual.",
+        )
+        handover = c.date_input(
+            "Handover start",
+            value=None if not current else current.get("handover_start"),
+            help="Manual downstream readiness date. Leave blank to derive from the upstream plan.",
+        )
+        notes = st.text_area("Manager notes", "" if not current else str(current.get("notes") or ""))
+        submitted = st.form_submit_button("Save manager inputs", type="primary")
+
+    if submitted:
+        try:
+            estimate = _parse_optional_number(estimate_text, "PTM Estimate")
+            override = _parse_optional_number(override_text, "Remaining Override")
+            save_stage_input(
+                code,
+                department,
+                estimate_hours=estimate,
+                remaining_override_hours=override,
+                handover_start=handover,
+                notes=notes,
+                user=user,
+                expected_version=version,
+            )
+        except StageInputConflict as exc:
+            current_row = exc.current or {}
+            st.error(
+                "Conflict: another user changed these manager inputs before your save. "
+                f"Current version is {current_row.get('version', '?')} "
+                f"by {current_row.get('updated_by', 'another user')}. Reload before saving again."
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.success("Manager inputs saved.")
+            st.rerun()
+
+
+def _planning_grid(user: str) -> None:
+    st.subheader("RS / GIS / PLS Planner")
+    projects = list_projects(active_only=True)
+    if not projects:
+        st.info("Sync High Level projects before planning.")
+        return
+
+    top1, top2, top3, top4 = st.columns([1.4, 1.4, 2, 3])
+    department = top1.segmented_control(
+        "Department", DEPARTMENTS, default="RS", key="ptm_grid_department"
+    )
+    horizon = int(
+        top2.selectbox(
+            "Horizon",
+            [4, 8, 12, 16, 26],
+            index=2,
+            format_func=lambda n: f"{n} weeks",
+            key="ptm_grid_horizon",
+        )
+    )
+    today = date.today()
+    default_start = today - timedelta(days=today.weekday())
+    start_week = top3.date_input("Planning start", default_start, key="ptm_grid_start")
+    if isinstance(start_week, pd.Timestamp):
+        start_week = start_week.date()
+    start_week = start_week - timedelta(days=start_week.weekday())
+    view_mode = top4.segmented_control(
+        "Planner view",
+        ["Selected project", "Team by project", "Processor drill-down"],
+        default="Selected project",
+        key="ptm_grid_view_mode",
+    )
+
+    st.session_state["ptm_presence_view"] = f"Planner {department}"
+    st.session_state["ptm_presence_department"] = department
+
+    if view_mode == "Team by project":
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "team overview"
+        frame, summary, weeks = build_team_project_matrix(
+            department,
+            start_week=start_week,
+            horizon_weeks=horizon,
+        )
+        st.caption(
+            "All project and non-project hours for the selected team. "
+            "This is the department-level view of where the team's time is going."
+        )
+        if frame.empty:
+            st.info("No project or activity hours match this team and horizon.")
+        else:
+            total_planned = float(frame["Planned h"].fillna(0).sum())
+            free_row = (
+                summary[summary["Summary"] == "FREE / OVER"]
+                if not summary.empty else pd.DataFrame()
+            )
+            free_total = (
+                float(free_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+                if not free_row.empty else 0.0
+            )
+            capacity_row = (
+                summary[summary["Summary"] == "TEAM CAPACITY"]
+                if not summary.empty else pd.DataFrame()
+            )
+            capacity_total = (
+                float(capacity_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+                if not capacity_row.empty else 0.0
+            )
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Team capacity", f"{capacity_total:,.1f} h")
+            m2.metric("Planned", f"{total_planned:,.1f} h")
+            m3.metric("Free / over", f"{free_total:,.1f} h")
+            week_columns = [week.isoformat() for week in weeks]
+            _readonly_grid(
+                frame,
+                week_columns=week_columns,
+                key=f"ptm_team_project::{department}::{start_week}::{horizon}",
+                fixed_department=department,
+                gap_field="Gap vs Remaining",
+            )
+            st.markdown("#### Capacity summary")
+            _readonly_grid(
+                summary,
+                week_columns=week_columns,
+                key=f"ptm_team_project_summary::{department}::{start_week}::{horizon}",
+                summary_field="Summary",
+                summary_prefix_width=536,
+            )
+        return
+
+    if view_mode == "Processor drill-down":
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "processor drill-down"
+        capacity_rows = weekly_person_capacity(
+            start_week,
+            horizon,
+            department=department,
+        )
+        people = sorted({row["person_name"] for row in capacity_rows})
+        if not people:
+            st.info(f"No processors are available in {department} for this horizon.")
+            return
+        person = st.selectbox(
+            "Processor",
+            people,
+            key=f"ptm_processor_drilldown::{department}",
+        )
+
+        snapshot_key = (
+            f"ptm_processor_snapshot::{department}::{person}::"
+            f"{start_week.isoformat()}::{horizon}"
+        )
+        if snapshot_key not in st.session_state:
+            frame, summary, weeks, _, versions = build_processor_project_matrix(
+                department,
+                person,
+                start_week=start_week,
+                horizon_weeks=horizon,
+            )
+            st.session_state[snapshot_key] = {
+                "frame": frame.to_dict("records"),
+                "summary": summary.to_dict("records"),
+                "weeks": [week.isoformat() for week in weeks],
+                "versions": versions,
+            }
+
+        snapshot = st.session_state[snapshot_key]
+        frame = pd.DataFrame(snapshot["frame"])
+        summary = pd.DataFrame(snapshot["summary"])
+        weeks = [date.fromisoformat(value) for value in snapshot["weeks"]]
+        versions = snapshot["versions"]
+        week_columns = [week.isoformat() for week in weeks]
+
+        available_row = summary[summary["Summary"] == "AVAILABLE"]
+        planned_row = summary[summary["Summary"] == "PLANNED"]
+        free_row = summary[summary["Summary"] == "FREE / OVER"]
+        available_total = (
+            float(available_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not available_row.empty else 0.0
+        )
+        planned_total = (
+            float(planned_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not planned_row.empty else 0.0
+        )
+        free_total = (
+            float(free_row.drop(columns=["Summary"]).sum(axis=1).iloc[0])
+            if not free_row.empty else 0.0
+        )
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Available", f"{available_total:,.1f} h")
+        m2.metric("Planned", f"{planned_total:,.1f} h")
+        m3.metric("Free / over", f"{free_total:,.1f} h")
+
+        with st.expander(f"{person} · project / activity breakdown", expanded=True):
+            if frame.empty:
+                st.info("No project or activity hours are allocated to this processor in the selected horizon.")
+            else:
+                gb = GridOptionsBuilder.from_dataframe(frame)
+                gb.configure_default_column(
+                    editable=False,
+                    sortable=False,
+                    filter=False,
+                    resizable=True,
+                    suppressMenu=True,
+                )
+                gb.configure_column("Project Code", pinned="left", width=96, minWidth=88, maxWidth=108)
+                gb.configure_column("Project / Activity", pinned="left", width=168, minWidth=145, maxWidth=220)
+                gb.configure_column("Type", width=76, minWidth=70, maxWidth=88)
+                gb.configure_column("Total h", width=84, minWidth=78, maxWidth=92)
+                for week in weeks:
+                    key = week.isoformat()
+                    gb.configure_column(
+                        key,
+                        header_name=week.strftime("%d %b"),
+                        width=78,
+                        minWidth=74,
+                        maxWidth=96,
+                        editable=JsCode("function(params) { return params.data.Type === 'PROJECT'; }"),
+                        type=["numericColumn"],
+                        valueFormatter="Number(value || 0).toFixed(1)",
+                        cellStyle=JsCode(
+                            f"""
+                            function(params) {{
+                              const value = Number(params.value || 0);
+                              if (params.data.Type !== 'PROJECT') {{
+                                return value > 0
+                                  ? {{backgroundColor:'#eeeeee', color:'#555555'}}
+                                  : {{backgroundColor:'#f7f7f7', color:'#777777'}};
+                              }}
+                              return value > 0
+                                ? {{backgroundColor:'{GRID_COLOURS["editable"]}'}}
+                                : {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+                            }}
+                            """
+                        ),
+                    )
+                options = gb.build()
+                options["domLayout"] = "autoHeight"
+                options["rowHeight"] = 32
+                options["headerHeight"] = 36
+                response = AgGrid(
+                    frame,
+                    gridOptions=options,
+                    allow_unsafe_jscode=True,
+                    fit_columns_on_grid_load=False,
+                    theme="streamlit",
+                    update_mode=GridUpdateMode.VALUE_CHANGED,
+                    height=42 + (32 * len(frame)),
+                    width="100%",
+                    key=f"ptm_processor_matrix::{snapshot_key}",
+                )
+                edited = pd.DataFrame(response["data"])
+                changes = changed_processor_matrix_cells(
+                    frame,
+                    edited,
+                    department=department,
+                    person_name=person,
+                    weeks=weeks,
+                    versions=versions,
+                )
+                b1, b2, b3 = st.columns([2, 2, 6])
+                save_clicked = b1.button(
+                    f"Save changes ({len(changes)})",
+                    type="primary",
+                    disabled=not changes,
+                    key=f"ptm_processor_save::{snapshot_key}",
+                )
+                if b2.button("Reload latest", key=f"ptm_processor_reload::{snapshot_key}"):
+                    st.session_state.pop(snapshot_key, None)
+                    st.rerun()
+                b3.caption("Only project rows are editable here. Activities remain read-only.")
+
+                if save_clicked:
+                    try:
+                        save_grid_changes(changes, user=user)
+                    except AllocationConflict as exc:
+                        current = exc.current or {}
+                        st.error(
+                            "Conflict: another user changed one of these processor allocations first. "
+                            f"Current value: {current.get('hours', '?')} h, "
+                            f"version {current.get('version', '?')}. Reload latest before retrying."
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.session_state.pop(snapshot_key, None)
+                        st.success(f"Saved {len(changes)} changed processor allocation cell(s).")
+                        st.rerun()
+
+            st.markdown("##### Weekly availability")
+            _readonly_grid(
+                summary,
+                week_columns=week_columns,
+                key=f"ptm_processor_summary::{department}::{person}::{start_week}::{horizon}",
+                summary_field="Summary",
+                summary_prefix_width=424,
+            )
+        return
+
+    queue = build_work_queue()[department]
+    if not queue:
+        st.info(f"No active {department} project demand.")
+        return
+    choices = {
+        f"{row['Project Code']} · {row['Project']}": row["Project Code"] for row in queue
+    }
+    selected_label = st.selectbox("Project", list(choices), key="ptm_grid_project")
+    project_code = choices[selected_label]
+
+    st.session_state["ptm_presence_project"] = project_code
+    st.session_state["ptm_presence_scope"] = "weekly allocations"
+    heartbeat_session(
+        _presence_session_id(),
+        user_email=st.session_state.user_email,
+        display_name=st.session_state.display_name,
+        role=st.session_state.role,
+        **_presence_context(),
+    )
+
+    workload = project_workload_card(project_code, department)
+    metrics = st.columns(6)
+    metrics[0].metric("Bid", "—" if workload["Bid h"] is None else f"{workload['Bid h']:,.1f} h")
+    metrics[1].metric("Estimate", "—" if workload["Estimate h"] is None else f"{workload['Estimate h']:,.1f} h")
+    metrics[2].metric("Actual", f"{workload['Actual h']:,.1f} h")
+    metrics[3].metric("Remaining", "—" if workload["Remaining h"] is None else f"{workload['Remaining h']:,.1f} h")
+    metrics[4].metric("Planned", f"{workload['Planned h']:,.1f} h")
+    metrics[5].metric("Action", workload["Action"])
+
+    snapshot_key = (
+        f"ptm_grid_snapshot::{department}::{project_code}::"
+        f"{start_week.isoformat()}::{horizon}"
+    )
+    active_snapshot_key = "ptm_active_grid_snapshot"
+    if st.session_state.get(active_snapshot_key) != snapshot_key:
+        st.session_state[active_snapshot_key] = snapshot_key
+
+    if snapshot_key not in st.session_state:
+        frame, versions, weeks = build_department_grid(
+            department,
+            project_code,
+            start_week=start_week,
+            horizon_weeks=horizon,
+        )
+        st.session_state[snapshot_key] = {
+            "frame": frame.to_dict("records"),
+            "versions": versions,
+            "weeks": [week.isoformat() for week in weeks],
+        }
+
+    snapshot = st.session_state[snapshot_key]
+    original = pd.DataFrame(snapshot["frame"])
+    weeks = [date.fromisoformat(value) for value in snapshot["weeks"]]
+    versions = snapshot["versions"]
+
+    if original.empty:
+        st.warning(
+            "No processors are available in this department yet. "
+            "Roster / temporary assignments can be added in People / Time Off."
+        )
+        return
+
+    _planner_legend()
+    st.caption(
+        "Edit the selected project's hours directly in the weekly cells. Only changed cells are saved. "
+        "If another manager saves the same person/week/project first, your stale save is rejected."
+    )
+
+    gb = GridOptionsBuilder.from_dataframe(original)
+    gb.configure_default_column(
+        editable=False,
+        sortable=False,
+        filter=False,
+        resizable=True,
+        suppressMenu=True,
+    )
+    gb.configure_column("Person", pinned="left", width=180, minWidth=180, maxWidth=180)
+    gb.configure_column("Role", pinned="left", width=180, minWidth=180, maxWidth=180)
+    gb.configure_column(
+        "H Available",
+        pinned="left",
+        width=105,
+        type=["numericColumn"],
+        valueFormatter="Number(value).toFixed(1)",
+    )
+    gb.configure_column(
+        "H Left",
+        pinned="left",
+        width=90,
+        type=["numericColumn"],
+        valueFormatter="Number(value).toFixed(1)",
+        cellStyle=JsCode(
+            f"""
+            function(params) {{
+              const value = Number(params.value || 0);
+              if (value < -0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+              if (value <= 0.01) return {{backgroundColor:'{GRID_COLOURS["no_headroom"]}'}};
+              return {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+            }}
+            """
+        ),
+    )
+    for week in weeks:
+        week_key = week.isoformat()
+        avail_key = f"__available__{week_key}"
+        other_key = f"__other__{week_key}"
+        off_key = f"__timeoff__{week_key}"
+        for helper in (avail_key, other_key, off_key):
+            gb.configure_column(helper, hide=True)
+        gb.configure_column(
+            week_key,
+            header_name=week.strftime("%d %b"),
+            width=82,
+            editable=True,
+            type=["numericColumn"],
+            valueFormatter="Number(value || 0).toFixed(1)",
+            cellStyle=JsCode(
+                f"""
+                function(params) {{
+                  const avail = Number(params.data['{avail_key}'] || 0);
+                  const other = Number(params.data['{other_key}'] || 0);
+                  const value = Number(params.value || 0);
+                  const total = other + value;
+                  const timeOff = Boolean(params.data['{off_key}']);
+                  if (total > avail + 0.01) return {{backgroundColor:'{GRID_COLOURS["over"]}', color:'#7f1d1d', fontWeight:'600'}};
+                  if (timeOff) return {{backgroundColor:'{GRID_COLOURS["time_off"]}'}};
+                  if (avail <= 0.01) return {{backgroundColor:'{GRID_COLOURS["unavailable"]}', color:'#6b7280'}};
+                  if (Math.abs(total - avail) <= 0.01) return {{backgroundColor:'{GRID_COLOURS["no_headroom"]}'}};
+                  if (value > 0) return {{backgroundColor:'{GRID_COLOURS["editable"]}'}};
+                  return {{backgroundColor:'{GRID_COLOURS["available"]}'}};
+                }}
+                """
+            ),
+        )
+
+    grid_options = gb.build()
+    grid_options["domLayout"] = "autoHeight"
+    grid_options["rowHeight"] = 32
+    grid_options["headerHeight"] = 36
+    editable_minimum_width = 640 + (78 * len(weeks))
+    grid_options["onGridSizeChanged"] = JsCode(
+        f"""
+        function(params) {{
+          if (params.clientWidth >= {editable_minimum_width}) {{
+            window.setTimeout(function() {{ params.api.sizeColumnsToFit(); }}, 0);
+          }}
+        }}
+        """
+    )
+
+    response = AgGrid(
+        original,
+        gridOptions=grid_options,
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=False,
+        theme="streamlit",
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        height=42 + (32 * len(original)),
+        width="100%",
+        key=f"ptm_grid_editor::{snapshot_key}",
+    )
+    edited = pd.DataFrame(response["data"])
+
+    changes = changed_grid_cells(
+        original,
+        edited,
+        project_code=project_code,
+        department=department,
+        weeks=weeks,
+        versions=versions,
+    )
+    save_col, reload_col, info_col = st.columns([2, 2, 6])
+    save_clicked = save_col.button(
+        f"Save changes ({len(changes)})",
+        type="primary",
+        disabled=not changes,
+        key=f"ptm_grid_save::{snapshot_key}",
+    )
+    if reload_col.button("Reload latest", key=f"ptm_grid_reload::{snapshot_key}"):
+        st.session_state.pop(snapshot_key, None)
+        st.rerun()
+    info_col.caption(
+        "Snapshot is held stable while you edit. Reload latest discards unsaved local edits."
+    )
+
+    if save_clicked:
+        try:
+            save_grid_changes(changes, user=user)
+        except AllocationConflict as exc:
+            current = exc.current or {}
+            st.error(
+                "Conflict: another user saved one of the same allocation cells first. "
+                f"Current value: {current.get('hours', '?')} h, "
+                f"version {current.get('version', '?')}, by {current.get('updated_by', 'another user')}. "
+                "Your batch was rolled back. Reload latest before retrying."
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.pop(snapshot_key, None)
+            st.success(f"Saved {len(changes)} changed allocation cell(s).")
+            st.rerun()
+
+    st.markdown("#### Capacity summary")
+    summary = allocation_grid_summary(
+        department,
+        project_code,
+        start_week=start_week,
+        horizon_weeks=horizon,
+    )
+    if not summary.empty:
+        _readonly_grid(
+            summary,
+            week_columns=[week.isoformat() for week in weeks],
+            key=f"ptm_grid_summary::{snapshot_key}",
+            summary_field="Summary",
+            summary_prefix_width=555,
+        )
+
+def _teams_breakdown() -> None:
+    st.subheader("Teams Breakdown")
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 2])
+    view_mode = c1.selectbox(
+        "View Mode", ["By Department", "By Project"], key="ptm_tb_view_mode"
+    )
+    department = c2.selectbox(
+        "Department", ["All", *DEPARTMENTS], key="ptm_tb_department"
+    )
+    scope = c3.selectbox(
+        "Project Scope",
+        ["All", "Projects Only", "Activities Only", "Selected Projects"],
+        key="ptm_tb_scope",
+    )
+    today = date.today()
+    default_start = today - timedelta(days=today.weekday())
+    start_week = c4.date_input("Start Week", default_start, key="ptm_tb_start")
+    start_week = start_week - timedelta(days=start_week.weekday())
+    horizon = int(
+        c5.selectbox(
+            "Horizon", [4, 8, 12, 16, 26], index=2,
+            format_func=lambda n: f"{n} weeks", key="ptm_tb_horizon",
+        )
+    )
+
+    selected_projects: list[str] = []
+    if scope == "Selected Projects":
+        projects = list_projects(active_only=True)
+        options = {
+            f"{row['project_code']} · {row['project_name']}": row["project_code"]
+            for row in projects
+        }
+        selected_labels = st.multiselect(
+            "Selected projects",
+            list(options),
+            key="ptm_tb_selected_projects",
+        )
+        selected_projects = [options[label] for label in selected_labels]
+
+    st.session_state["ptm_presence_view"] = "Teams Breakdown"
+    st.session_state["ptm_presence_department"] = None if department == "All" else department
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    frame, summary = build_teams_breakdown(
+        start_week=start_week,
+        horizon_weeks=horizon,
+        view_mode=view_mode,
+        department=department,
+        scope=scope,
+        selected_projects=selected_projects,
+    )
+    if frame.empty:
+        st.info("No rows match the current Teams Breakdown filters.")
+    else:
+        week_columns = [
+            column for column in frame.columns
+            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-"
+        ]
+        config = {
+            "Remaining h": st.column_config.NumberColumn(format="%.1f"),
+            "Assigned h": st.column_config.NumberColumn(format="%.1f"),
+            "Gap vs Remaining": st.column_config.NumberColumn(format="%.1f"),
+            "Actual h": st.column_config.NumberColumn(format="%.1f"),
+        }
+        for column in week_columns:
+            config[column] = st.column_config.NumberColumn(
+                date.fromisoformat(column).strftime("%d %b"), format="%.1f"
+            )
+        display_frame = frame.drop(columns=["Group"], errors="ignore")
+        if scope == "Projects Only":
+            display_frame = display_frame.drop(columns=["Type"], errors="ignore")
+        _readonly_grid(
+            display_frame,
+            week_columns=week_columns,
+            key=(
+                f"ptm_teams_breakdown::{view_mode}::{department}::{scope}::"
+                f"{start_week}::{horizon}::{','.join(selected_projects)}"
+            ),
+            department_field="Dept",
+            gap_field="Gap vs Remaining",
+        )
+
+    st.markdown("#### Department capacity")
+    if not summary.empty:
+        summary_week_columns = [
+            column for column in summary.columns
+            if len(str(column)) == 10 and str(column)[4] == "-" and str(column)[7] == "-"
+        ]
+        teams_prefix_width = 616 if scope == "Projects Only" else 692
+        _readonly_grid(
+            summary,
+            week_columns=summary_week_columns,
+            key=f"ptm_teams_capacity::{department}::{start_week}::{horizon}",
+            summary_field="Summary",
+            summary_prefix_width=teams_prefix_width,
+        )
+
+
+def _resource_management(user: str) -> None:
+    st.subheader("People / Time Off")
+    st.caption(
+        "All edits are row-level. Filtering this view never deletes hidden roster records."
+    )
+    people_tab, assignment_tab, time_off_tab = st.tabs(
+        ["People", "Temporary assignments", "Time Off"]
+    )
+
+    with people_tab:
+        people = list_people(active_only=False)
+        today = date.today()
+        current_week = today - timedelta(days=today.weekday())
+        capacity_rows = weekly_person_capacity(current_week, 1)
+        capacity_by_person: dict[str, float] = {}
+        for row in capacity_rows:
+            capacity_by_person[row["person_name"]] = (
+                capacity_by_person.get(row["person_name"], 0.0)
+                + float(row.get("available_hours") or 0)
+            )
+
+        show = st.segmented_control(
+            "Roster view",
+            ["Active", "Inactive", "All"],
+            default="Active",
+            key="ptm_people_filter",
+        )
+        filtered = [
+            row for row in people
+            if show == "All"
+            or (show == "Active" and bool(row["active"]))
+            or (show == "Inactive" and not bool(row["active"]))
+        ]
+        display = pd.DataFrame(
+            [
+                {
+                    "Name": row["person_name"],
+                    "Home Department": row["home_department"],
+                    "Primary Role": row.get("primary_role"),
+                    "Standard h/day": row["standard_hours_day"],
+                    "Active": bool(row["active"]),
+                    "Active From": row.get("active_from"),
+                    "Active To": row.get("active_to"),
+                    "Available this week": round(capacity_by_person.get(row["person_name"], 0), 1),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in filtered
+            ]
+        )
+        if display.empty:
+            st.info("No people match the selected roster filter.")
+        else:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Standard h/day": st.column_config.NumberColumn(format="%.1f"),
+                    "Available this week": st.column_config.NumberColumn(format="%.1f"),
+                    "Active From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Active To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                },
+            )
+
+        st.markdown("#### Add or edit person")
+        choices = ["+ New person"] + [row["person_name"] for row in people]
+        selected = st.selectbox("Person", choices, key="ptm_people_edit")
+        current = None if selected == "+ New person" else next(
+            row for row in people if row["person_name"] == selected
+        )
+        version = 0 if current is None else int(current["version"])
+        with st.form("ptm_person_form"):
+            a, b, c1, d = st.columns(4)
+            name = a.text_input(
+                "Name",
+                "" if current is None else current["person_name"],
+                disabled=current is not None,
+                help="Existing names are stable record keys during the migration.",
+            )
+            home = b.selectbox(
+                "Home Department",
+                DEPARTMENTS,
+                index=0 if current is None else DEPARTMENTS.index(current["home_department"]),
+            )
+            standard = c1.number_input(
+                "Standard h/day",
+                min_value=0.5,
+                max_value=24.0,
+                step=0.5,
+                value=7.5 if current is None else float(current["standard_hours_day"]),
+            )
+            active = d.checkbox("Active", value=True if current is None else bool(current["active"]))
+            e, f = st.columns(2)
+            primary = e.text_input(
+                "Primary Role", "" if current is None else str(current.get("primary_role") or "")
+            )
+            secondary = f.text_input(
+                "Secondary Role", "" if current is None else str(current.get("secondary_role") or "")
+            )
+            g, h = st.columns(2)
+            active_from = g.date_input(
+                "Active From",
+                value=None if current is None else current.get("active_from"),
+            )
+            active_to = h.date_input(
+                "Active To",
+                value=None if current is None else current.get("active_to"),
+            )
+            submitted = st.form_submit_button("Save person", type="primary")
+
+        if submitted:
+            try:
+                save_person(
+                    name,
+                    home_department=home,
+                    primary_role=primary,
+                    secondary_role=secondary,
+                    standard_hours_day=standard,
+                    active=active,
+                    active_from=active_from,
+                    active_to=active_to,
+                    user=user,
+                    expected_version=version,
+                )
+            except ResourceConflict as exc:
+                current_row = exc.current or {}
+                st.error(
+                    "Conflict: another user changed this roster row first. "
+                    f"Current version: {current_row.get('version', '?')} "
+                    f"by {current_row.get('updated_by', 'another user')}. Reload before retrying."
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success("Person saved.")
+                st.rerun()
+
+    with assignment_tab:
+        people = list_people(active_only=False)
+        assignments = list_assignments()
+        display = pd.DataFrame(
+            [
+                {
+                    "ID": row["id"],
+                    "Name": row["person_name"],
+                    "From": row["from_date"],
+                    "To": row.get("to_date"),
+                    "Target Department": row["department"],
+                    "Allocation %": float(row["allocation_percent"]),
+                    "Assignment Type": row["assignment_type"],
+                    "Notes": row.get("notes"),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in assignments
+            ]
+        )
+        if not display.empty:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Allocation %": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+            )
+        else:
+            st.info("No temporary assignments recorded.")
+
+        st.markdown("#### Add or edit assignment")
+        assignment_choices = ["+ New assignment"] + [
+            f"{row['id']} · {row['person_name']} · {row['department']} · {row['from_date']}"
+            for row in assignments
+        ]
+        selected_assignment = st.selectbox(
+            "Assignment", assignment_choices, key="ptm_assignment_edit"
+        )
+        current_assignment = None
+        if selected_assignment != "+ New assignment":
+            assignment_id = int(selected_assignment.split(" · ", 1)[0])
+            current_assignment = next(
+                row for row in assignments if int(row["id"]) == assignment_id
+            )
+        person_names = [row["person_name"] for row in people]
+        if not person_names:
+            st.warning("Add roster people before creating temporary assignments.")
+        else:
+            with st.form("ptm_assignment_form"):
+                a, b, c1 = st.columns(3)
+                selected_person = a.selectbox(
+                    "Person",
+                    person_names,
+                    index=0 if current_assignment is None else person_names.index(current_assignment["person_name"]),
+                )
+                from_date = b.date_input(
+                    "From",
+                    value=date.today() if current_assignment is None else current_assignment["from_date"],
+                )
+                to_date = c1.date_input(
+                    "To",
+                    value=None if current_assignment is None else current_assignment.get("to_date"),
+                )
+                d, e, f = st.columns(3)
+                target = d.selectbox(
+                    "Target Department",
+                    DEPARTMENTS,
+                    index=0 if current_assignment is None else DEPARTMENTS.index(current_assignment["department"]),
+                )
+                allocation_pct = e.number_input(
+                    "Allocation %",
+                    min_value=1,
+                    max_value=100,
+                    step=5,
+                    value=100 if current_assignment is None else int(round(float(current_assignment["allocation_percent"]) * 100)),
+                )
+                assignment_type = f.selectbox(
+                    "Assignment Type",
+                    ["TEMP_SUPPORT", "SECONDMENT"],
+                    index=0 if current_assignment is None else (
+                        1 if current_assignment["assignment_type"] == "SECONDMENT" else 0
+                    ),
+                )
+                notes = st.text_area(
+                    "Notes",
+                    "" if current_assignment is None else str(current_assignment.get("notes") or ""),
+                )
+                submitted_assignment = st.form_submit_button(
+                    "Save assignment", type="primary"
+                )
+
+            if submitted_assignment:
+                try:
+                    save_assignment(
+                        assignment_id=None if current_assignment is None else int(current_assignment["id"]),
+                        person_name=selected_person,
+                        from_date=from_date,
+                        to_date=to_date,
+                        department=target,
+                        allocation_percent=float(allocation_pct) / 100,
+                        assignment_type=assignment_type,
+                        notes=notes,
+                        user=user,
+                        expected_version=0 if current_assignment is None else int(current_assignment["version"]),
+                    )
+                except ResourceConflict as exc:
+                    current_row = exc.current or {}
+                    st.error(
+                        "Conflict: another user changed this assignment first. "
+                        f"Current version: {current_row.get('version', '?')}."
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Temporary assignment saved.")
+                    st.rerun()
+
+    with time_off_tab:
+        people = list_people(active_only=False)
+        time_off_rows = list_time_off()
+        display = pd.DataFrame(
+            [
+                {
+                    "ID": row["id"],
+                    "Name": row["person_name"],
+                    "From": row["from_date"],
+                    "To": row.get("to_date"),
+                    "Type": row["time_off_type"],
+                    "Available h/day": row["available_hours_day"],
+                    "Notes": row.get("notes"),
+                    "Version": row["version"],
+                    "Updated by": row["updated_by"],
+                }
+                for row in time_off_rows
+            ]
+        )
+        if not display.empty:
+            st.dataframe(
+                display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "From": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "To": st.column_config.DateColumn(format="DD MMM YYYY"),
+                    "Available h/day": st.column_config.NumberColumn(format="%.1f"),
+                },
+            )
+        else:
+            st.info("No Time Off records.")
+
+        st.markdown("#### Add or edit Time Off")
+        time_off_choices = ["+ New Time Off"] + [
+            f"{row['id']} · {row['person_name']} · {row['from_date']}"
+            for row in time_off_rows
+        ]
+        selected_time_off = st.selectbox(
+            "Time Off record", time_off_choices, key="ptm_time_off_edit"
+        )
+        current_time_off = None
+        if selected_time_off != "+ New Time Off":
+            time_off_id = int(selected_time_off.split(" · ", 1)[0])
+            current_time_off = next(
+                row for row in time_off_rows if int(row["id"]) == time_off_id
+            )
+        person_names = [row["person_name"] for row in people]
+        if not person_names:
+            st.warning("Add roster people before creating Time Off.")
+        else:
+            with st.form("ptm_time_off_form"):
+                a, b, c1 = st.columns(3)
+                selected_person = a.selectbox(
+                    "Person",
+                    person_names,
+                    index=0 if current_time_off is None else person_names.index(current_time_off["person_name"]),
+                    key="ptm_time_off_person",
+                )
+                from_date = b.date_input(
+                    "From",
+                    value=date.today() if current_time_off is None else current_time_off["from_date"],
+                    key="ptm_time_off_from",
+                )
+                to_date = c1.date_input(
+                    "To",
+                    value=None if current_time_off is None else current_time_off.get("to_date"),
+                    key="ptm_time_off_to",
+                )
+                d, e = st.columns(2)
+                types = ["HOLIDAY", "SICK", "TRAINING", "APPOINTMENT", "OTHER"]
+                off_type = d.selectbox(
+                    "Type",
+                    types,
+                    index=0 if current_time_off is None or current_time_off["time_off_type"] not in types else types.index(current_time_off["time_off_type"]),
+                )
+                available = e.number_input(
+                    "Available h/day",
+                    min_value=0.0,
+                    max_value=24.0,
+                    step=0.5,
+                    value=0.0 if current_time_off is None else float(current_time_off["available_hours_day"]),
+                    help="0 = unavailable. 4 = half-day availability for an 8 h/day person.",
+                )
+                notes = st.text_area(
+                    "Notes",
+                    "" if current_time_off is None else str(current_time_off.get("notes") or ""),
+                    key="ptm_time_off_notes",
+                )
+                submitted_time_off = st.form_submit_button("Save Time Off", type="primary")
+
+            if submitted_time_off:
+                try:
+                    save_time_off(
+                        time_off_id=None if current_time_off is None else int(current_time_off["id"]),
+                        person_name=selected_person,
+                        from_date=from_date,
+                        to_date=to_date or from_date,
+                        time_off_type=off_type,
+                        available_hours_day=available,
+                        notes=notes,
+                        user=user,
+                        expected_version=0 if current_time_off is None else int(current_time_off["version"]),
+                    )
+                except ResourceConflict as exc:
+                    current_row = exc.current or {}
+                    st.error(
+                        "Conflict: another user changed this Time Off record first. "
+                        f"Current version: {current_row.get('version', '?')}."
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success("Time Off saved. Capacity will reflect the change immediately.")
+                    st.rerun()
+
+
+def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
+    init_planner_store()
+    st.header("PTM Planner")
+    st.caption(
+        "Multi-user Planner foundation: source-controlled High Level facts, "
+        "row-level manager writes, optimistic conflict protection and live presence."
+    )
+    section = st.segmented_control(
+        "Planner area",
+        [
+            "Projects / Work Queue",
+            "RS / GIS / PLS",
+            "Teams Breakdown",
+            "Flow",
+            "Rates Tracker",
+            "People / Time Off",
+        ],
+        default="Projects / Work Queue",
+        key="ptm_v2_section",
+    )
+    # Render one PTM area only. This keeps grid edits fast and also makes presence
+    # reflect the screen the user is actually working in.
+    if section == "Projects / Work Queue":
+        _work_queue(user, is_admin=is_admin)
+    elif section == "RS / GIS / PLS":
+        _planning_grid(user)
+    elif section == "Teams Breakdown":
+        _teams_breakdown()
+    elif section == "Flow":
+        _flow_view()
+    elif section == "Rates Tracker":
+        _rates_tracker_view()
+    else:
+        st.session_state["ptm_presence_view"] = "People / Time Off"
+        st.session_state["ptm_presence_department"] = None
+        st.session_state["ptm_presence_project"] = None
+        st.session_state["ptm_presence_scope"] = "resources"
+        _resource_management(user)
+
+    render_presence_bar()
