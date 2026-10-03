@@ -19,6 +19,11 @@ from app.data.planner_store import (
     purge_stale_sessions,
     save_stage_input,
 )
+from app.integrations.delivery_operations import (
+    read_flow_dashboard,
+    read_rates_tracker_front_page,
+    read_rates_tracker_project,
+)
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
 from app.services.dot_sync import DOT_SYNC_SOURCE, sync_dot_actuals
 from app.services.high_level_export import export_to_high_level
@@ -310,6 +315,236 @@ def render_presence_bar() -> None:
                 f"Also editing {current_department} / {current_project}: {names}. "
                 "You can continue working; stale writes are blocked by version checks."
             )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_flow_dashboard() -> dict:
+    return read_flow_dashboard()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_rates_front_page() -> list[dict]:
+    return read_rates_tracker_front_page()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_rates_project(project_code: str) -> dict:
+    return read_rates_tracker_project(project_code)
+
+
+def _flow_view() -> None:
+    st.subheader("Flow")
+    st.caption(
+        "Read-only operational flow view from the Delivery Operations spreadsheet. "
+        "Source data remains owned by the Google Sheet."
+    )
+    refresh_col, status_col = st.columns([1, 5])
+    if refresh_col.button("Refresh source", key="ptm_flow_refresh"):
+        _cached_flow_dashboard.clear()
+        st.rerun()
+
+    st.session_state["ptm_presence_view"] = "Flow"
+    st.session_state["ptm_presence_department"] = None
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    try:
+        payload = _cached_flow_dashboard()
+    except GoogleSheetsConfigurationError as exc:
+        st.warning(str(exc))
+        st.caption(
+            "Configure DELIVERY_OPERATIONS_SPREADSHEET_ID in Render and share the "
+            "Delivery Operations spreadsheet with the Planner service account as Viewer."
+        )
+        return
+    except Exception as exc:
+        st.error(f"Flow source could not be loaded: {exc}")
+        return
+
+    snapshot = payload.get("snapshot") or "Unknown"
+    status_col.caption(f"Latest source snapshot: {snapshot}")
+
+    current = pd.DataFrame(payload.get("current_state") or [])
+    st.markdown("#### Current Production State")
+    if current.empty:
+        st.info("No current production-state rows were returned.")
+    else:
+        config = {}
+        for column in current.columns:
+            if column != "Project":
+                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        st.dataframe(
+            current,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+    movement = pd.DataFrame(payload.get("movement") or [])
+    st.markdown("#### Movement Since Tuesday 15:00")
+    if payload.get("movement_period"):
+        st.caption(payload["movement_period"])
+    if movement.empty:
+        st.info("No movement rows were returned.")
+    else:
+        config = {}
+        for column in movement.columns:
+            if column != "Project":
+                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        st.dataframe(
+            movement,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+    backlog = pd.DataFrame(payload.get("backlog") or [])
+    st.markdown("#### Production Backlog")
+    if backlog.empty:
+        st.info("No backlog rows were returned.")
+    else:
+        config = {
+            "Queue km": st.column_config.NumberColumn(format="%.1f km"),
+            "Historical Capacity km/week": st.column_config.NumberColumn(format="%.1f km/week"),
+            "Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+            "Provisional Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+            "Weeks Used": st.column_config.NumberColumn(format="%.0f"),
+            "Lookback Weeks": st.column_config.NumberColumn(format="%.0f"),
+            "Target Weeks": st.column_config.NumberColumn(format="%.0f"),
+        }
+        st.dataframe(
+            backlog,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
+
+
+def _rates_tracker_view() -> None:
+    st.subheader("Rates Tracker")
+    st.caption(
+        "Read-only view from Production Rates Estimations Tracker. "
+        "Use the source spreadsheet for edits while we validate parity."
+    )
+    refresh_col, _ = st.columns([1, 5])
+    if refresh_col.button("Refresh source", key="ptm_rates_refresh"):
+        _cached_rates_front_page.clear()
+        _cached_rates_project.clear()
+        st.rerun()
+
+    st.session_state["ptm_presence_view"] = "Rates Tracker"
+    st.session_state["ptm_presence_department"] = None
+    st.session_state["ptm_presence_project"] = None
+    st.session_state["ptm_presence_scope"] = "read only"
+
+    try:
+        rows = _cached_rates_front_page()
+    except GoogleSheetsConfigurationError as exc:
+        st.warning(str(exc))
+        st.caption(
+            "Configure RATES_TRACKER_SPREADSHEET_ID in Render and share the "
+            "Production Rates Estimations Tracker spreadsheet with the Planner service account as Viewer."
+        )
+        return
+    except Exception as exc:
+        st.error(f"Rates Tracker source could not be loaded: {exc}")
+        return
+
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        st.info("No Rates Tracker project rows were returned.")
+        return
+
+    f1, f2 = st.columns([2, 1])
+    search = f1.text_input("Project search", key="ptm_rates_search").strip().lower()
+    ownership = f2.selectbox(
+        "With Richard?",
+        ["All", "Yes", "No"],
+        key="ptm_rates_with_richard",
+    )
+
+    filtered = frame.copy()
+    if search:
+        mask = (
+            filtered["Project"].astype(str).str.lower().str.contains(search, na=False)
+            | filtered["Name"].astype(str).str.lower().str.contains(search, na=False)
+        )
+        filtered = filtered[mask]
+    if ownership == "Yes":
+        filtered = filtered[filtered["With Richard?"] == True]
+    elif ownership == "No":
+        filtered = filtered[filtered["With Richard?"] == False]
+
+    total_hours = float(filtered["Total"].fillna(0).sum()) if "Total" in filtered else 0.0
+    rs_hours = float(filtered["RS Hours"].fillna(0).sum()) if "RS Hours" in filtered else 0.0
+    gis_hours = float(filtered["GIS Hours"].fillna(0).sum()) if "GIS Hours" in filtered else 0.0
+    pls_hours = float(filtered["PLS Hours"].fillna(0).sum()) if "PLS Hours" in filtered else 0.0
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Projects", len(filtered))
+    m2.metric("RS", f"{rs_hours:,.0f} h")
+    m3.metric("GIS", f"{gis_hours:,.0f} h")
+    m4.metric("PLS", f"{pls_hours:,.0f} h")
+    m5.metric("Total", f"{total_hours:,.0f} h")
+
+    st.dataframe(
+        filtered,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "RS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "GIS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "PLS Hours": st.column_config.NumberColumn(format="%.1f h"),
+            "Total": st.column_config.NumberColumn(format="%.1f h"),
+            "With Richard?": st.column_config.CheckboxColumn(),
+        },
+    )
+
+    st.markdown("#### Project rate assumptions")
+    options = {
+        f"{row['Project']} · {row['Name']}": row["Project"]
+        for row in filtered.to_dict("records")
+    }
+    if not options:
+        st.info("No project matches the current filters.")
+        return
+    selected = st.selectbox(
+        "Project",
+        list(options),
+        key="ptm_rates_project",
+    )
+    project_code = options[selected]
+    st.session_state["ptm_presence_project"] = project_code
+
+    try:
+        detail = _cached_rates_project(project_code)
+    except Exception as exc:
+        st.error(f"Project rate assumptions could not be loaded: {exc}")
+        return
+
+    if not detail.get("sheet_title"):
+        st.info("No project tab matching this project code was found in the Rates Tracker.")
+        return
+
+    caption_parts = [detail["sheet_title"]]
+    if detail.get("project_name"):
+        caption_parts.append(detail["project_name"])
+    st.caption(" · ".join(caption_parts))
+
+    assumptions = pd.DataFrame(detail.get("assumptions") or [])
+    if assumptions.empty:
+        st.info("No rate-assumption rows were found on this project tab.")
+    else:
+        config = {}
+        if "Rate km/day" in assumptions.columns:
+            config["Rate km/day"] = st.column_config.NumberColumn(format="%.1f")
+        if "Hrs" in assumptions.columns:
+            config["Hrs"] = st.column_config.NumberColumn(format="%.1f h")
+        st.dataframe(
+            assumptions,
+            hide_index=True,
+            use_container_width=True,
+            column_config=config,
+        )
 
 
 def _parse_optional_number(value: str, label: str) -> float | None:
@@ -1531,7 +1766,14 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     )
     section = st.segmented_control(
         "Planner area",
-        ["Projects / Work Queue", "RS / GIS / PLS", "Teams Breakdown", "People / Time Off"],
+        [
+            "Projects / Work Queue",
+            "RS / GIS / PLS",
+            "Teams Breakdown",
+            "Flow",
+            "Rates Tracker",
+            "People / Time Off",
+        ],
         default="Projects / Work Queue",
         key="ptm_v2_section",
     )
@@ -1543,6 +1785,10 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
         _planning_grid(user)
     elif section == "Teams Breakdown":
         _teams_breakdown()
+    elif section == "Flow":
+        _flow_view()
+    elif section == "Rates Tracker":
+        _rates_tracker_view()
     else:
         st.session_state["ptm_presence_view"] = "People / Time Off"
         st.session_state["ptm_presence_department"] = None
