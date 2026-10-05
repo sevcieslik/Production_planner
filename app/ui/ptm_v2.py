@@ -19,13 +19,20 @@ from app.data.planner_store import (
     purge_stale_sessions,
     save_stage_input,
 )
+from app.data.flow_store import (
+    flow_store_counts,
+    import_legacy_flow,
+    list_flow_config,
+    save_flow_config,
+)
 from app.integrations.delivery_operations import (
-    read_flow_dashboard,
+    parse_delivery_operations_workbook,
     read_rates_tracker_front_page,
     read_rates_tracker_project,
 )
 from app.integrations.google_sheets import GoogleSheetsConfigurationError
 from app.services.dot_sync import DOT_SYNC_SOURCE, sync_dot_actuals
+from app.services.flow_dashboard import build_flow_dashboard
 from app.services.high_level_export import export_to_high_level
 from app.services.high_level_sync import sync_high_level_projects
 from app.services.ptm_capacity import weekly_person_capacity
@@ -318,11 +325,6 @@ def render_presence_bar() -> None:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _cached_flow_dashboard() -> dict:
-    return read_flow_dashboard()
-
-
-@st.cache_data(ttl=300, show_spinner=False)
 def _cached_rates_front_page() -> list[dict]:
     return read_rates_tracker_front_page()
 
@@ -332,91 +334,195 @@ def _cached_rates_project(project_code: str) -> dict:
     return read_rates_tracker_project(project_code)
 
 
-def _flow_view() -> None:
+def _flow_view(user: str, *, is_admin: bool) -> None:
     st.subheader("Flow")
     st.caption(
-        "Read-only operational flow view from the Delivery Operations spreadsheet. "
-        "Source data remains owned by the Google Sheet."
+        "Planner-owned operational Flow. Delivery Operations is used only as a one-time "
+        "legacy migration source; the live screen reads PostgreSQL."
     )
-    refresh_col, status_col = st.columns([1, 5])
-    if refresh_col.button("Refresh source", key="ptm_flow_refresh"):
-        _cached_flow_dashboard.clear()
-        st.rerun()
 
     st.session_state["ptm_presence_view"] = "Flow"
     st.session_state["ptm_presence_department"] = None
     st.session_state["ptm_presence_project"] = None
-    st.session_state["ptm_presence_scope"] = "read only"
+    st.session_state["ptm_presence_scope"] = "flow"
+
+    if is_admin:
+        with st.expander("Flow migration / configuration", expanded=False):
+            counts = flow_store_counts()
+            st.caption(
+                f"Planner DB: {counts['history']:,} historical project snapshots · "
+                f"{counts['movements']:,} movement rows · {counts['backlog']:,} backlog rows."
+            )
+
+            legacy_file = st.file_uploader(
+                "One-time legacy import",
+                type=["xlsx"],
+                key="ptm_flow_legacy_upload",
+                help=(
+                    "Upload Delivery Operations.xlsx once to migrate _tracker_history, "
+                    "_tracker_movements and _flow_kpis into PostgreSQL. The workbook is "
+                    "not needed after import."
+                ),
+            )
+            if legacy_file is not None:
+                if st.button("Import legacy Flow history", type="primary", key="ptm_flow_import"):
+                    try:
+                        parsed = parse_delivery_operations_workbook(legacy_file.getvalue())
+                        result = import_legacy_flow(parsed, user=user)
+                    except Exception as exc:
+                        st.error(f"Legacy Flow import failed: {exc}")
+                    else:
+                        st.success(
+                            "Legacy Flow migrated to Planner DB: "
+                            f"{result['history']:,} history rows · "
+                            f"{result['movements']:,} movement rows · "
+                            f"{result['backlog']:,} backlog rows."
+                        )
+                        st.rerun()
+
+            st.markdown("##### Flow Configuration")
+            st.caption(
+                "This configuration belongs to Planner. Product/status mapping fields are "
+                "stored now and will drive the live upstream mapping when the tracker sync is connected."
+            )
+            config_rows = list_flow_config()
+            config_frame = pd.DataFrame(
+                [
+                    {
+                        "Section": row["section"],
+                        "Source key": row["source_key"],
+                        "Label": row["label"],
+                        "Department": row.get("department") or "",
+                        "Order": row["sort_order"],
+                        "Active": bool(row["active"]),
+                        "Product keys": row.get("product_keys") or "",
+                        "Statuses": row.get("statuses") or "",
+                        "Status groups": row.get("status_groups") or "",
+                    }
+                    for row in config_rows
+                ]
+            )
+            edited_config = st.data_editor(
+                config_frame,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["Section", "Source key"],
+                column_config={
+                    "Section": st.column_config.TextColumn(width="small"),
+                    "Source key": st.column_config.TextColumn(width="medium"),
+                    "Label": st.column_config.TextColumn(width="medium"),
+                    "Department": st.column_config.SelectboxColumn(
+                        options=["", "RS", "GIS", "PLS"], width="small"
+                    ),
+                    "Order": st.column_config.NumberColumn(min_value=0, step=10, width="small"),
+                    "Active": st.column_config.CheckboxColumn(width="small"),
+                    "Product keys": st.column_config.TextColumn(
+                        help="Comma-separated tracker product keys."
+                    ),
+                    "Statuses": st.column_config.TextColumn(
+                        help="Comma-separated tracker statuses."
+                    ),
+                    "Status groups": st.column_config.TextColumn(
+                        help="Comma-separated tracker status groups."
+                    ),
+                },
+                key="ptm_flow_config_editor",
+            )
+            if st.button("Save Flow Configuration", key="ptm_flow_config_save"):
+                rows = [
+                    {
+                        "section": row["Section"],
+                        "source_key": row["Source key"],
+                        "label": row["Label"],
+                        "department": row["Department"],
+                        "sort_order": row["Order"],
+                        "active": row["Active"],
+                        "product_keys": row["Product keys"],
+                        "statuses": row["Statuses"],
+                        "status_groups": row["Status groups"],
+                    }
+                    for row in edited_config.to_dict("records")
+                ]
+                changed = save_flow_config(rows, user=user)
+                st.success(f"Saved {changed} Flow configuration row(s).")
+                st.rerun()
 
     try:
-        payload = _cached_flow_dashboard()
-    except GoogleSheetsConfigurationError as exc:
-        st.warning(str(exc))
-        st.caption(
-            "Configure DELIVERY_OPERATIONS_SPREADSHEET_ID in Render and share the "
-            "Delivery Operations spreadsheet with the Planner service account as Viewer."
-        )
-        return
+        payload = build_flow_dashboard()
     except Exception as exc:
-        st.error(f"Flow source could not be loaded: {exc}")
+        st.error(f"Flow could not be built from Planner DB: {exc}")
         return
 
-    snapshot = payload.get("snapshot") or "Unknown"
-    status_col.caption(f"Latest source snapshot: {snapshot}")
+    if payload is None:
+        st.info(
+            "No Flow history has been migrated into Planner yet. "
+            "An admin can open Flow migration / configuration and import the legacy workbook once."
+        )
+        return
+
+    snapshot_at = payload["snapshot_at"]
+    st.caption(
+        f"Latest Planner Flow snapshot: {snapshot_at.strftime('%d %b %Y %H:%M')} · "
+        "source data stored in PostgreSQL"
+    )
 
     current = pd.DataFrame(payload.get("current_state") or [])
     st.markdown("#### Current Production State")
     if current.empty:
-        st.info("No current production-state rows were returned.")
+        st.info("No current production-state rows at the latest snapshot.")
     else:
-        config = {}
-        for column in current.columns:
-            if column != "Project":
-                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        column_config = {
+            column: st.column_config.NumberColumn(format="%.1f km")
+            for column in payload.get("current_columns", [])
+            if column in current.columns
+        }
         st.dataframe(
             current,
             hide_index=True,
             use_container_width=True,
-            column_config=config,
+            column_config=column_config,
         )
 
     movement = pd.DataFrame(payload.get("movement") or [])
     st.markdown("#### Movement Since Tuesday 15:00")
-    if payload.get("movement_period"):
-        st.caption(payload["movement_period"])
+    st.caption(
+        f"{payload['movement_from'].strftime('%d %b %Y %H:%M')} → "
+        f"{payload['movement_to'].strftime('%d %b %Y %H:%M')}"
+    )
     if movement.empty:
-        st.info("No movement rows were returned.")
+        st.info("No movement in the selected Flow buckets during this period.")
     else:
-        config = {}
-        for column in movement.columns:
-            if column != "Project":
-                config[column] = st.column_config.NumberColumn(format="%.1f km")
+        column_config = {
+            column: st.column_config.NumberColumn(format="%.1f km")
+            for column in payload.get("movement_columns", [])
+            if column in movement.columns
+        }
         st.dataframe(
             movement,
             hide_index=True,
             use_container_width=True,
-            column_config=config,
+            column_config=column_config,
         )
 
     backlog = pd.DataFrame(payload.get("backlog") or [])
     st.markdown("#### Production Backlog")
     if backlog.empty:
-        st.info("No backlog rows were returned.")
+        st.info("No backlog snapshot has been migrated yet.")
     else:
-        config = {
-            "Queue km": st.column_config.NumberColumn(format="%.1f km"),
-            "Historical Capacity km/week": st.column_config.NumberColumn(format="%.1f km/week"),
-            "Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
-            "Provisional Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
-            "Weeks Used": st.column_config.NumberColumn(format="%.0f"),
-            "Lookback Weeks": st.column_config.NumberColumn(format="%.0f"),
-            "Target Weeks": st.column_config.NumberColumn(format="%.0f"),
-        }
         st.dataframe(
             backlog,
             hide_index=True,
             use_container_width=True,
-            column_config=config,
+            column_config={
+                "As Of": st.column_config.DatetimeColumn(format="DD MMM YYYY HH:mm"),
+                "Queue km": st.column_config.NumberColumn(format="%.1f km"),
+                "Historical Capacity km/week": st.column_config.NumberColumn(format="%.1f km/week"),
+                "Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+                "Provisional Backlog Weeks": st.column_config.NumberColumn(format="%.1f"),
+                "Weeks Used": st.column_config.NumberColumn(format="%.0f"),
+                "Lookback Weeks": st.column_config.NumberColumn(format="%.0f"),
+                "Target Weeks": st.column_config.NumberColumn(format="%.0f"),
+            },
         )
 
 
@@ -1786,7 +1892,7 @@ def render_ptm_v2(user: str, *, is_admin: bool = False) -> None:
     elif section == "Teams Breakdown":
         _teams_breakdown()
     elif section == "Flow":
-        _flow_view()
+        _flow_view(user, is_admin=is_admin)
     elif section == "Rates Tracker":
         _rates_tracker_view()
     else:
