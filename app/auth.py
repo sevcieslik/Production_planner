@@ -84,7 +84,14 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 def navigation_for_role(role: str) -> list[str]:
-    tabs = ["Projects", "Planning", "Principles", "Resource Management"]
+    # New deployments default to the PostgreSQL-backed PTM Planner only.
+    # Legacy SQLite pages can be temporarily exposed with PLANNER_SHOW_LEGACY_UI=true.
+    show_legacy = os.getenv("PLANNER_SHOW_LEGACY_UI", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    tabs = ["PTM Planner"]
+    if show_legacy:
+        tabs.extend(["Projects", "Planning", "Principles", "Resource Management"])
     if role == "admin":
         tabs.append("Administration")
     return tabs

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import os
 import pandas as pd
 import altair as alt
 import streamlit as st
 
 from app.auth import AuthenticationConfigurationError, authenticate, load_users, navigation_for_role
 from app.data.db import connect, initialize_database, rows, write_audit
+from app.data.planner_store import remove_session
 from app.services.mvp import (
     DISCIPLINES, RESOURCE_DATE_COLUMNS, allocation_timeline, apply_holiday_snapshot,
     apply_quick_allocation, capacity_balance, clear_future_allocation, create_escalation,
@@ -29,6 +31,7 @@ from app.services.legacy_allocation_import import (
     apply_legacy_allocation, legacy_preview_row_key, legacy_upload_key,
     preview_legacy_allocation,
 )
+from app.ui.ptm_v2 import render_ptm_v2
 from app.ui.visuals import (
     AVAILABILITY_COLOURS, CAPACITY_COLOURS, DEPARTMENT_COLOURS,
     DEPARTMENT_TINTS, HEALTH_COLOURS, INTERNAL_ACTIVITY_COLOUR,
@@ -172,7 +175,17 @@ title_col.title("Production Planner")
 title_col.caption(f"Signed in as {st.session_state.display_name} · {st.session_state.user_email}")
 if logout_col.button("Logout"):
     record_access_event(user, "Logout")
-    for key in ("authenticated", "user_email", "display_name", "role"):
+    presence_session_id = st.session_state.get("ptm_presence_session_id")
+    if presence_session_id:
+        try:
+            remove_session(presence_session_id)
+        except Exception:
+            pass
+    for key in (
+        "authenticated", "user_email", "display_name", "role",
+        "ptm_presence_session_id", "ptm_presence_view", "ptm_presence_department",
+        "ptm_presence_project", "ptm_presence_scope",
+    ):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -263,8 +276,15 @@ def render_gantt_chart(gantt: pd.DataFrame, planning_start: date, planning_end: 
     st.dataframe(style_planning_table(gantt), hide_index=True, use_container_width=True)
 
 
-planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
-planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
+show_legacy_ui = os.getenv("PLANNER_SHOW_LEGACY_UI", "").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+if show_legacy_ui:
+    planning_start = st.sidebar.date_input("Planning start", monday(date.today()))
+    planning_end = st.sidebar.date_input("Planning end", monday(date.today()) + timedelta(weeks=12))
+else:
+    planning_start = monday(date.today())
+    planning_end = planning_start + timedelta(weeks=12)
 weeks = week_starts(planning_start, planning_end) if planning_end >= planning_start else []
 
 
@@ -772,10 +792,24 @@ def principles_view() -> None:
 
 
 labels = navigation_for_role(st.session_state.role)
-tabs = st.tabs(labels)
-with tabs[0]: project_view()
-with tabs[1]: planning_view()
-with tabs[2]: principles_view()
-with tabs[3]: resource_management_view()
-if st.session_state.role == "admin":
-    with tabs[4]: administration_view()
+selected_page = st.sidebar.radio(
+    "Navigation",
+    labels,
+    key="main_navigation",
+)
+
+# Render exactly one application area. The previous tab layout executed every page
+# on every Streamlit rerun, which made a small allocation edit pay for Projects,
+# Planning, Resource Management and Administration queries at the same time.
+if selected_page == "Projects":
+    project_view()
+elif selected_page == "PTM Planner":
+    render_ptm_v2(user, is_admin=st.session_state.role == "admin")
+elif selected_page == "Planning":
+    planning_view()
+elif selected_page == "Principles":
+    principles_view()
+elif selected_page == "Resource Management":
+    resource_management_view()
+elif selected_page == "Administration" and st.session_state.role == "admin":
+    administration_view()
