@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime
+from io import BytesIO
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import gspread
+import openpyxl
 
 from app.integrations.google_sheets import GoogleSheetsConfigurationError, google_client
 
@@ -261,3 +265,154 @@ def read_rates_tracker_project(
     parsed = parse_rates_project_values(worksheet.get_all_values())
     parsed["sheet_title"] = worksheet.title
     return parsed
+
+
+LEGACY_HISTORY_COLUMNS = {
+    "TPC Outstanding km": "tpc_outstanding_km",
+    "TPC WIP km": "tpc_wip_km",
+    "GIS Ready km": "gis_ready_km",
+    "GIS Production WIP km": "gis_production_wip_km",
+    "GIS Subcon WIP km": "gis_subcon_wip_km",
+    "GIS Ready For QC km": "gis_ready_for_qc_km",
+    "GIS QC WIP km": "gis_qc_wip_km",
+    "PLS Ready km": "pls_ready_km",
+    "PLS WIP km": "pls_wip_km",
+}
+
+LEGACY_BACKLOG_COLUMNS = {
+    "Queue km": "queue_km",
+    "Historical Capacity km/week": "historical_capacity_km_week",
+    "Backlog Weeks": "backlog_weeks",
+    "Provisional Backlog Weeks": "provisional_backlog_weeks",
+    "Weeks Used": "weeks_used",
+    "Lookback Weeks": "lookback_weeks",
+    "Target Weeks": "target_weeks",
+    "Status": "status",
+}
+
+_LONDON = ZoneInfo("Europe/London")
+
+
+def _aware_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=_LONDON)
+    text = _text(value)
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=_LONDON)
+        except ValueError:
+            pass
+    return None
+
+
+def _worksheet_values(workbook, title: str) -> list[list[Any]]:
+    if title not in workbook.sheetnames:
+        return []
+    worksheet = workbook[title]
+    values: list[list[Any]] = []
+    for row in worksheet.iter_rows(values_only=True):
+        values.append(list(row))
+    return values
+
+
+def _records_from_sheet(values: list[list[Any]]) -> list[dict[str, Any]]:
+    if not values:
+        return []
+    headers = [_text(value) for value in values[0]]
+    output: list[dict[str, Any]] = []
+    for raw in values[1:]:
+        if not any(value not in (None, "") for value in raw):
+            continue
+        row = {}
+        for index, header in enumerate(headers):
+            if not header:
+                continue
+            row[header] = raw[index] if index < len(raw) else None
+        output.append(row)
+    return output
+
+
+def parse_delivery_operations_workbook(content: bytes) -> dict[str, Any]:
+    """Parse a legacy Delivery Operations workbook for one-time DB migration.
+
+    This is deliberately a file parser, not a live Google Sheets dependency.
+    """
+    workbook = openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=False)
+
+    flow_values = _worksheet_values(workbook, "Flow")
+    dashboard = parse_flow_values(flow_values) if flow_values else None
+    dashboard_snapshot_at = None
+    if dashboard and dashboard.get("snapshot"):
+        dashboard_snapshot_at = _aware_datetime(dashboard["snapshot"])
+
+    history: list[dict[str, Any]] = []
+    for raw in _records_from_sheet(_worksheet_values(workbook, "_tracker_history")):
+        snapshot_at = _aware_datetime(raw.get("Snapshot Date"))
+        project_code = _text(raw.get("Project Code"))
+        project_name = _text(raw.get("Project Name"))
+        if snapshot_at is None or not project_code or not project_name:
+            continue
+        metrics = {}
+        for legacy_header, key in LEGACY_HISTORY_COLUMNS.items():
+            value = _number(raw.get(legacy_header))
+            metrics[key] = 0.0 if value is None else value
+        history.append(
+            {
+                "snapshot_at": snapshot_at,
+                "project_code": project_code,
+                "project_name": project_name,
+                "metrics": metrics,
+            }
+        )
+
+    movements: list[dict[str, Any]] = []
+    movement_rows = _records_from_sheet(_worksheet_values(workbook, "_tracker_movements"))
+    fixed = {"from_snapshot", "to_snapshot", "project_code", "project_name", "portfolio_status"}
+    for raw in movement_rows:
+        from_snapshot = _aware_datetime(raw.get("from_snapshot"))
+        to_snapshot = _aware_datetime(raw.get("to_snapshot"))
+        project_code = _text(raw.get("project_code"))
+        project_name = _text(raw.get("project_name"))
+        if from_snapshot is None or to_snapshot is None or not project_code or not project_name:
+            continue
+        metrics = {}
+        for key, value in raw.items():
+            if key in fixed or not key:
+                continue
+            number = _number(value)
+            metrics[key] = 0.0 if number is None else number
+        movements.append(
+            {
+                "from_snapshot": from_snapshot,
+                "to_snapshot": to_snapshot,
+                "project_code": project_code,
+                "project_name": project_name,
+                "portfolio_status": _text(raw.get("portfolio_status")) or None,
+                "metrics": metrics,
+            }
+        )
+
+    backlog: list[dict[str, Any]] = []
+    for raw in _records_from_sheet(_worksheet_values(workbook, "_flow_kpis")):
+        as_of = _aware_datetime(raw.get("As Of"))
+        team = _text(raw.get("Team"))
+        if as_of is None or not team:
+            continue
+        metrics: dict[str, Any] = {}
+        for legacy_header, key in LEGACY_BACKLOG_COLUMNS.items():
+            value = raw.get(legacy_header)
+            if key == "status":
+                metrics[key] = _text(value)
+            else:
+                metrics[key] = _number(value)
+        backlog.append({"as_of": as_of, "team": team, "metrics": metrics})
+
+    return {
+        "dashboard": dashboard,
+        "dashboard_snapshot_at": dashboard_snapshot_at,
+        "history": history,
+        "movements": movements,
+        "backlog": backlog,
+    }
